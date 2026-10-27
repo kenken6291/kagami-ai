@@ -1,4 +1,4 @@
-/* かがみAI app.js v1.1.0 */
+/* かがみAI app.js v1.3.0 */
 const C = window.CONFIG;
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
@@ -517,7 +517,7 @@ function renderAnalysis(a) {
   $('#a-narration').textContent = cleanNarration(a.narration || '');
   renderAiHair(a.hairSuggestions || [], a.hairColorSuggestion);
   renderAiMakeup(a.makeup);
-  renderVideos(a.videoQueries || []);
+  loadRecommendations(true);
 }
 
 /* =========================================================
@@ -1330,84 +1330,186 @@ async function deleteSelectedLooks() {
 /* =========================================================
  * 5. 動画
  * ========================================================= */
-function renderVideos(list) {
-  $('#video-list').replaceChildren(...list.map(q => videoRow(q.title || q.query, q.query)));
-  $('#videos-empty').hidden = list.length > 0;
+const videos = { available: false, topics: [], active: 'all', selected: null, kind: 'long' };
+const KIND_FIELD = { long: 'videos', short: 'shorts' };
+const isShortKind = () => videos.kind === 'short';
+
+const ytSearchUrl = (q, short) => 'https://www.youtube.com/results?search_query=' + encodeURIComponent(short ? q + ' #shorts' : q);
+const ytWatchUrl = (id, short) => short
+  ? 'https://www.youtube.com/shorts/' + encodeURIComponent(id)
+  : 'https://www.youtube.com/watch?v=' + encodeURIComponent(id);
+
+function videoContext() {
+  const a = state.analysis || {};
+  return {
+    faceShape: a.faceShape || '',
+    personalColor: a.personalColor || '',
+    hair: state.hair.appliedLabel || state.hair.label || '',
+    makeup: hasMakeup() ? makeupSummaryText() : '',
+    request: $('#request-input').value.trim(),
+    hints: (a.videoQueries || []).map(q => q.query).slice(0, 3),
+  };
 }
 
-function videoRow(title, query) {
-  const ytFrame = el('div', { class: 'vframe' }, el('p', { class: 'muted' }, '「YouTubeで探す」を押すと、ここで再生できます。'));
-  const ytThumbs = el('div', { class: 'vthumbs' });
-  const yt = el('div', { class: 'vpanel' },
-    el('h4', {}, 'YouTube'), ytFrame, ytThumbs,
-    el('div', { class: 'vactions' },
-      el('button', { type: 'button', class: 'btn btn-small btn-ghost', onclick: () => loadYouTube(ytFrame, ytThumbs, query) }, 'YouTubeで探す'),
-      el('a', { class: 'link', href: 'https://www.youtube.com/results?search_query=' + encodeURIComponent(query), target: '_blank', rel: 'noopener' }, 'YouTubeアプリで開く')));
+const plainTopics = list => list.map(t => ({ title: t.title, query: t.query, reason: t.reason || '' }));
 
-  const ttFrame = el('div', { class: 'vframe tall' }, el('p', { class: 'muted' }, 'TikTokで見つけた動画のURLを貼ると、ここで再生できます。'));
-  const ttInput = el('input', { type: 'url', placeholder: 'https://www.tiktok.com/@…/video/…', 'aria-label': 'TikTok動画のURL' });
-  const tt = el('div', { class: 'vpanel' },
-    el('h4', {}, 'TikTok'), ttFrame,
-    el('div', { class: 'vactions' },
-      el('a', { class: 'btn btn-small btn-ghost', href: 'https://www.tiktok.com/search?q=' + encodeURIComponent(query), target: '_blank', rel: 'noopener' }, 'TikTokで探す')),
-    el('div', { class: 'vpaste' }, ttInput,
-      el('button', { type: 'button', class: 'btn btn-small btn-ghost', onclick: () => embedTikTok(ttFrame, ttInput.value) }, '表示')));
-
-  return el('article', { class: 'vrow' },
-    el('h3', {}, title),
-    el('p', { class: 'vquery' }, '検索ワード：' + query),
-    el('div', { class: 'vgrid' }, yt, tt));
-}
-
-async function loadYouTube(frame, thumbs, query) {
-  frame.replaceChildren(el('p', { class: 'muted' }, '探しています…'));
+/** AIのおすすめ動画を取得（fromAnalysis=true は分析結果のテーマをそのまま使う） */
+async function loadRecommendations(fromAnalysis = false) {
+  const qs = state.analysis?.videoQueries || [];
+  const kind = videos.kind;
+  const body = fromAnalysis && qs.length ? { topics: qs, kind } : { context: videoContext(), kind };
+  const btn = $('#video-reco-btn');
+  btn.disabled = true;
+  $('#video-status').textContent = 'AIがおすすめの動画を探しています…';
   try {
-    const r = await api('videos', { query });
-    if (!r.available || !r.items.length) {
-      frame.replaceChildren(el('p', { class: 'muted' }, r.available
-        ? '動画が見つかりませんでした。「YouTubeアプリで開く」からお探しください。'
-        : 'ここでの再生は準備中です。「YouTubeアプリで開く」からご覧ください。'));
+    const r = await api('recommendVideos', body);
+    videos.available = r.available;
+    videos.topics = (r.topics || []).map((t, i) => {
+      const topic = { title: t.title, query: t.query, reason: t.reason, key: 't' + Date.now() + i };
+      topic[KIND_FIELD[kind]] = t.videos || [];
+      return topic;
+    });
+    videos.active = 'all';
+    videos.selected = null;
+    renderVideoReco();
+    selectFirstVideo();
+    $('#video-status').textContent = videos.available ? '' : 'アプリ内での再生は準備中のため、YouTubeの検索ページを開く形で表示しています。';
+  } catch (e) {
+    $('#video-status').textContent = 'おすすめを表示できませんでした：' + e.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '今の髪型・メイクでおすすめを更新';
+  }
+}
+
+/** 通常／ショートの切り替え（まだ取得していない種類だけ取りに行く） */
+async function setVideoKind(kind) {
+  if (videos.kind === kind) return;
+  videos.kind = kind;
+  $$('#video-kind .chip').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.kind === kind)));
+  const field = KIND_FIELD[kind];
+  const missing = videos.topics.filter(t => !t[field]);
+  if (missing.length) {
+    $('#video-status').textContent = kind === 'short' ? 'ショート動画を探しています…' : '動画を探しています…';
+    try {
+      const r = await api('recommendVideos', { topics: plainTopics(missing), kind });
+      missing.forEach((t, i) => { t[field] = r.topics?.[i]?.videos || []; });
+      $('#video-status').textContent = '';
+    } catch (e) {
+      $('#video-status').textContent = '動画を表示できませんでした：' + e.message;
       return;
     }
-    const play = it => frame.replaceChildren(el('iframe', {
-      src: 'https://www.youtube-nocookie.com/embed/' + encodeURIComponent(it.id),
-      title: it.title,
-      allow: 'accelerometer; encrypted-media; gyroscope; picture-in-picture; fullscreen',
-      allowfullscreen: true,
-      loading: 'lazy',
-    }));
-    play(r.items[0]);
-    thumbs.replaceChildren(...r.items.map(it =>
-      el('button', { type: 'button', class: 'vthumb', title: it.title, onclick: () => play(it) },
-        it.thumb ? el('img', { src: it.thumb, alt: '', loading: 'lazy' }) : null,
-        el('span', {}, it.title))));
-  } catch (e) {
-    frame.replaceChildren(el('p', { class: 'muted' }, e.message));
   }
+  videos.selected = null;
+  renderVideoReco();
+  selectFirstVideo();
 }
 
-function embedTikTok(frame, url) {
-  const m = String(url).match(/\/video\/(\d+)/);
-  if (!m) {
-    toast('TikTokの動画URL（…/video/数字）を貼ってください。短いURLの場合は一度ブラウザで開いてからコピーしてください。', 'error');
-    return;
-  }
-  frame.replaceChildren(el('iframe', {
-    src: 'https://www.tiktok.com/embed/v2/' + m[1],
-    title: 'TikTok動画',
-    allow: 'encrypted-media; fullscreen',
-    loading: 'lazy',
+function selectFirstVideo() {
+  const field = KIND_FIELD[videos.kind];
+  const pool = videos.active === 'all' ? videos.topics : videos.topics.filter(t => t.key === videos.active);
+  const first = pool.find(t => t[field]?.length);
+  if (first) selectVideo(first, first[field][0], false);
+  else showTopicOnly();
+}
+
+function renderVideoReco() {
+  $('#video-area').hidden = videos.topics.length === 0;
+  const short = isShortKind();
+  const field = KIND_FIELD[videos.kind];
+
+  // テーマのチップ
+  const all = el('button', { type: 'button', class: 'chip', 'aria-pressed': String(videos.active === 'all') }, 'すべて');
+  all.addEventListener('click', () => { videos.active = 'all'; renderVideoReco(); });
+  $('#video-topics').replaceChildren(all, ...videos.topics.map(t => {
+    const b = el('button', { type: 'button', class: 'chip', 'aria-pressed': String(videos.active === t.key), title: t.reason || '' }, t.title);
+    b.addEventListener('click', () => { videos.active = t.key; renderVideoReco(); });
+    return b;
   }));
+
+  // 動画の一覧
+  const topics = videos.active === 'all' ? videos.topics : videos.topics.filter(t => t.key === videos.active);
+  const rows = [];
+  topics.forEach(t => {
+    const list = t[field] || [];
+    if (list.length) {
+      list.forEach(v => {
+        const b = el('button', { type: 'button', class: 'vcard' + (short ? ' is-short' : ''), 'aria-pressed': String(videos.selected?.id === v.id) },
+          el('img', { src: v.thumb, alt: '', loading: 'lazy' }),
+          el('span', { class: 'vcard-body' },
+            el('span', { class: 'vcard-topic' }, (short ? 'ショート／' : '') + t.title),
+            el('span', { class: 'vcard-title' }, v.title),
+            el('span', { class: 'vcard-ch' }, v.channel),
+            t.reason ? el('span', { class: 'vcard-reason' }, t.reason) : null));
+        b.addEventListener('click', () => selectVideo(t, v, true));
+        rows.push(el('li', {}, b));
+      });
+    } else {
+      rows.push(el('li', { class: 'vtopic-card' },
+        el('strong', {}, t.title),
+        el('p', {}, (t.reason ? t.reason + ' ' : '') + '検索ワード：' + t.query),
+        el('div', { class: 'vactions' },
+          el('a', { class: 'btn btn-small btn-ghost', href: ytSearchUrl(t.query, false), target: '_blank', rel: 'noopener' }, 'YouTubeで見る'),
+          el('a', { class: 'btn btn-small btn-ghost', href: ytSearchUrl(t.query, true), target: '_blank', rel: 'noopener' }, 'ショート動画で見る'))));
+    }
+  });
+  $('#video-list').replaceChildren(...rows);
 }
 
-function freeVideoSearch() {
+function selectVideo(topic, v, scroll) {
+  const short = isShortKind();
+  videos.selected = v;
+  const frame = $('#video-frame');
+  frame.classList.toggle('tall', short);
+  frame.replaceChildren(el('iframe', {
+    src: 'https://www.youtube-nocookie.com/embed/' + encodeURIComponent(v.id) + '?playsinline=1&rel=0',
+    title: v.title,
+    allow: 'accelerometer; encrypted-media; gyroscope; picture-in-picture; fullscreen',
+    allowfullscreen: true,
+  }));
+  $('#video-title').textContent = v.title;
+  $('#video-meta').textContent = `${v.channel}／${short ? 'ショート動画' : '通常の動画'}／テーマ：${topic.title}`;
+  const yt = $('#video-open-yt');
+  yt.href = ytWatchUrl(v.id, short);
+  yt.textContent = short ? 'YouTubeショートで開く' : 'YouTubeで開く';
+  yt.hidden = false;
+  renderVideoReco();
+  if (scroll) frame.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+function showTopicOnly() {
+  const frame = $('#video-frame');
+  frame.classList.toggle('tall', isShortKind());
+  frame.replaceChildren(el('p', { class: 'muted' }, '下の一覧から「YouTubeで見る」「ショート動画で見る」を選んでください。'));
+  $('#video-title').textContent = '';
+  $('#video-meta').textContent = '';
+  $('#video-open-yt').hidden = true;
+}
+
+/** 自分で探す：検索結果を新しいテーマとして先頭に追加 */
+async function freeVideoSearch() {
   const q = $('#video-free-input').value.trim();
   if (!q) return toast('検索ワードを入力してください。', 'error');
-  const row = videoRow(q, q);
-  $('#video-list').prepend(row);
-  $('#videos-empty').hidden = true;
-  $('#video-free-input').value = '';
-  $('button', row).click();
+  const btn = $('#video-free-btn');
+  btn.disabled = true;
+  try {
+    const kind = videos.kind;
+    const r = await api('recommendVideos', { topics: [{ title: '検索：' + q, query: q, reason: '' }], kind });
+    videos.available = r.available;
+    const t = { title: r.topics[0].title, query: q, reason: '', key: 't' + Date.now() };
+    t[KIND_FIELD[kind]] = r.topics[0].videos || [];
+    videos.topics.unshift(t);
+    videos.active = t.key;
+    renderVideoReco();
+    const list = t[KIND_FIELD[kind]];
+    if (list.length) selectVideo(t, list[0], true);
+    else showTopicOnly();
+    $('#video-free-input').value = '';
+  } catch (e) {
+    toast(e.message, 'error');
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 /* =========================================================
@@ -1658,7 +1760,8 @@ function handleCommand(text) {
   }
   if (/メイク/.test(t)) return go('step-makeup');
   if (/髪型|ヘア/.test(t)) return go('step-hair');
-  if (/動画/.test(t)) return go('step-videos');
+  if (/ショート/.test(t)) { go('step-videos'); return videos.topics.length ? setVideoKind('short') : (videos.kind = 'short', loadRecommendations(false)); }
+  if (/動画/.test(t)) { go('step-videos'); return loadRecommendations(false); }
   if (/使い方|ヘルプ/.test(t)) return openGuide();
 
   $('#request-input').value = text;
@@ -1713,6 +1816,8 @@ function bindMain() {
   $('#gal-mode').addEventListener('click', () => { gallery.slider = !gallery.slider; renderGalleryCompare(); });
   bindSideToggles();
 
+  $('#video-reco-btn').addEventListener('click', () => loadRecommendations(false));
+  $$('#video-kind .chip').forEach(b => b.addEventListener('click', () => setVideoKind(b.dataset.kind)));
   $('#video-free-btn').addEventListener('click', freeVideoSearch);
   $('#video-free-input').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); freeVideoSearch(); } });
 

@@ -105,7 +105,7 @@ main { max-width: 920px; margin: 0 auto; padding: 8px 20px 120px; }
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;
   min-height: 48px; padding: 10px 22px; border-radius: 999px; cursor: pointer;
-  border: 1.5px solid var(--ink); background: transparent; font-weight: 700; text-decoration: none;
+  border: 1.5px solid var(--ink); background: transparent; font-weight: 700; text-decoration: none; white-space: nowrap; flex: none;
   transition: background .15s, color .15s;
 }
 .btn:disabled { opacity: .45; cursor: not-allowed; }
@@ -318,24 +318,41 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--rouge); width:
 .gal-fig figcaption span { color: var(--ink-soft); }
 
 /* ---------- 動画 ---------- */
-.free-search { display: flex; gap: 8px; margin: 10px 0 20px; }
-.video-list { display: grid; gap: 30px; }
-.vrow h3 { font-family: var(--font-display); font-size: 1.25rem; margin: 0; }
-.vquery { margin: 0 0 10px; color: var(--ink-soft); font-size: .9rem; }
-.vgrid { display: grid; gap: 16px; }
-@media (min-width: 720px) { .vgrid { grid-template-columns: 1.4fr 1fr; } }
-.vpanel { background: var(--surface); border-radius: var(--radius); padding: 14px; border: 1px solid var(--line); }
-.vpanel h4 { margin: 0 0 8px; font-size: .95rem; }
-.vframe { aspect-ratio: 16 / 9; background: var(--glass); border-radius: 10px; overflow: hidden; display: grid; place-items: center; }
-.vframe.tall { aspect-ratio: 9 / 16; max-height: 560px; margin-inline: auto; width: 100%; max-width: 330px; }
+.free-search { display: flex; gap: 8px; margin: 24px 0 0; align-items: stretch; }
+.free-search input { flex: 1; min-width: 0; }
+.video-area { display: grid; gap: 22px; margin-top: 8px; }
+@media (min-width: 860px) {
+  .video-area { grid-template-columns: 1.25fr 1fr; align-items: start; }
+  .video-player { position: sticky; top: calc(12px + env(safe-area-inset-top, 0px)); }
+}
+.vframe { aspect-ratio: 16 / 9; background: var(--glass); border-radius: 12px; overflow: hidden; display: grid; place-items: center; }
+.vframe.tall { aspect-ratio: 9 / 16; max-height: 560px; margin: 10px auto 0; width: 100%; max-width: 330px; }
 .vframe p { padding: 16px; text-align: center; font-size: .92rem; margin: 0; }
 .vframe iframe { width: 100%; height: 100%; border: 0; }
-.vthumbs { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; margin-top: 10px; }
-.vthumb { background: none; border: 1px solid var(--line); border-radius: 8px; padding: 0; overflow: hidden; cursor: pointer; text-align: left; }
-.vthumb img { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; }
-.vthumb span { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: .78rem; line-height: 1.4; padding: 4px 6px; }
-.vactions { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin-top: 10px; }
-.vpaste { display: flex; gap: 6px; margin-top: 10px; }
+.video-title { font-size: 1.05rem; margin: 12px 0 2px; line-height: 1.5; }
+.video-meta { margin: 0; color: var(--ink-soft); font-size: .9rem; }
+.vactions { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center; margin-top: 8px; }
+#video-frame.tall { aspect-ratio: 9 / 16; max-height: 640px; max-width: 360px; margin-inline: auto; }
+.video-picker h3 { margin-top: 0; }
+.video-cards { list-style: none; margin: 14px 0 0; padding: 0; display: grid; gap: 8px; }
+.vcard {
+  width: 100%; display: grid; grid-template-columns: 132px 1fr; gap: 12px; align-items: start;
+  padding: 8px; border: 1.5px solid var(--line); border-radius: 12px; background: var(--surface);
+  cursor: pointer; text-align: left;
+}
+.vcard[aria-pressed="true"] { border-color: var(--rouge); box-shadow: 0 0 0 1px var(--rouge); }
+.vcard img { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 8px; background: var(--glass); }
+.vcard.is-short { grid-template-columns: 84px 1fr; }
+.vcard.is-short img { aspect-ratio: 9 / 16; }
+.vcard-body { display: grid; gap: 2px; min-width: 0; }
+.vcard-title { font-weight: 700; font-size: .92rem; line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.vcard-ch { font-size: .8rem; color: var(--ink-soft); }
+.vcard-topic { font-size: .78rem; color: var(--rouge); }
+.vcard-reason { font-size: .8rem; color: var(--ink-soft); line-height: 1.5; }
+.vtopic-card { padding: 12px 14px; border: 1.5px solid var(--line); border-radius: 12px; background: var(--surface); }
+.vtopic-card strong { display: block; }
+.vtopic-card p { margin: 2px 0 8px; font-size: .88rem; color: var(--ink-soft); }
+@media (max-width: 420px) { .vcard { grid-template-columns: 112px 1fr; } }
 
 /* ---------- 音声操作 ---------- */
 .voice-dock {

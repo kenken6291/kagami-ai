@@ -1,6 +1,6 @@
 /**
  * かがみAI ～ヘア＆メイク試着室  バックエンド（Google Apps Script）
- * v1.1.0
+ * v1.3.0
  *
  * ■ スクリプトプロパティ（プロジェクトの設定 → スクリプト プロパティ）
  *   必須  GEMINI_API_KEY        … Gemini APIキー
@@ -16,7 +16,7 @@
  * ■ コードを変更したら「デプロイを管理 → 編集 → 新バージョン」で再デプロイが必要です
  */
 
-const APP_VERSION = 'v1.1.0';
+const APP_VERSION = 'v1.3.0';
 const TERMS_VERSION = '2026-10-27';
 const SESSION_TTL = 21600;      // 6時間（CacheServiceの上限）
 const MAX_FAILS = 5;            // ログイン失敗の上限
@@ -149,6 +149,7 @@ const ROUTES = {
   hairEdit: hairEdit_,
   tts: tts_,
   videos: videos_,
+  recommendVideos: recommendVideos_,
   history: history_,
   deleteMyImages: deleteMyImages_,
   makeupPlan: makeupPlan_,
@@ -386,7 +387,7 @@ const ANALYZE_PROMPT = [
   '   "cheek": {"name": "色名", "hex": "#RRGGBB"},',
   '   "tips": "メイクのコツ（80字以内）"',
   ' },',
-  ' "videoQueries": [{"title": "動画で学ぶ内容（20字以内）", "query": "YouTube/TikTokの検索ワード"}],',
+  ' "videoQueries": [{"title": "動画で学ぶ内容（20字以内）", "query": "YouTubeの検索ワード"}],',
   ' "narration": "話し言葉の解説本文（200〜300字）"',
   '}',
   '',
@@ -557,18 +558,25 @@ function videos_(req) {
   if (!q) throw new Error('検索ワードがありません。');
   const key = prop_('YOUTUBE_API_KEY');
   if (!key) return { available: false, items: [] };
+  return { available: true, items: ytSearch_(q, 4, key, req.kind === 'short' ? 'short' : 'long') };
+}
 
+/** YouTube検索（6時間キャッシュ）。kind='short' はショート動画 */
+function ytSearch_(q, max, key, kind) {
+  const isShort = kind === 'short';
+  const query = isShort ? q + ' #shorts' : q;
   const cache = CacheService.getScriptCache();
-  const ck = 'yt_' + Utilities.base64EncodeWebSafe(
-    Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, q, Utilities.Charset.UTF_8));
+  const ck = 'yt' + (isShort ? 's' : 'l') + max + '_' + Utilities.base64EncodeWebSafe(
+    Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, query, Utilities.Charset.UTF_8));
   const hit = cache.get(ck);
-  if (hit) return { available: true, items: JSON.parse(hit) };
+  if (hit) return JSON.parse(hit);
 
-  const url = 'https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=4' +
+  const url = 'https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=' + max +
     '&videoEmbeddable=true&safeSearch=strict&relevanceLanguage=ja&regionCode=JP' +
-    '&q=' + encodeURIComponent(q) + '&key=' + encodeURIComponent(key);
+    '&videoDuration=' + (isShort ? 'short' : 'medium') +
+    '&q=' + encodeURIComponent(query) + '&key=' + encodeURIComponent(key);
   const r = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
-  if (r.getResponseCode() !== 200) return { available: false, items: [] };
+  if (r.getResponseCode() !== 200) return [];
 
   const items = (JSON.parse(r.getContentText()).items || []).map(function (it) {
     const th = it.snippet.thumbnails || {};
@@ -576,11 +584,73 @@ function videos_(req) {
       id: it.id.videoId,
       title: decodeEntities_(it.snippet.title),
       channel: decodeEntities_(it.snippet.channelTitle),
-      thumb: (th.medium || th.default || {}).url || '',
+      thumb: (th.high || th.medium || th.default || {}).url || '',
     };
   });
   cache.put(ck, JSON.stringify(items), 21600);
-  return { available: true, items: items };
+  return items;
+}
+
+const VIDEO_TOPIC_PROMPT = [
+  'あなたはヘアメイクの先生です。次の人に合う「やり方動画」をYouTube（通常動画・ショート動画）で探すための検索テーマを4つ考えてください。',
+  '',
+  '顔の形: {FACE}',
+  'パーソナルカラーの傾向: {PC}',
+  '試している髪型: {HAIR}',
+  'メイク: {MAKEUP}',
+  '本人の要望: {REQUEST}',
+  '参考の検索ワード: {HINTS}',
+  '',
+  '次のJSONだけを返してください（説明文やコードブロックは不要）。',
+  '{"topics": [{"title": "学べる内容（20字以内）", "query": "日本語の検索ワード（2〜5語、やり方・コツ等を含める）", "reason": "この人におすすめの理由（40字以内）"}]}',
+  '',
+  '条件: ヘアのセット・スタイリング方法を1〜2件、メイクのやり方を2〜3件。指定されたメイクの印象（鼻を高く・あごすっきり等）があれば必ず含める。',
+  '情報が少ない場合は、顔の形やパーソナルカラーに合うものを選ぶ。',
+].join('\n');
+
+/** AIが選んだテーマごとに動画を探す */
+function recommendVideos_(req) {
+  const s = requireActive_(req.token);
+  let topics = (Array.isArray(req.topics) ? req.topics : []).slice(0, 5).map(function (t) {
+    return {
+      title: sanitizeText_(t && t.title, 40),
+      query: sanitizeText_(t && t.query, 100),
+      reason: sanitizeText_(t && t.reason, 80),
+    };
+  }).filter(function (t) { return t.query; });
+
+  if (!topics.length) {
+    useQuota_(s.userId);
+    const c = req.context || {};
+    const prompt = VIDEO_TOPIC_PROMPT
+      .replace('{FACE}', sanitizeText_(c.faceShape, 30) || '不明')
+      .replace('{PC}', sanitizeText_(c.personalColor, 30) || '不明')
+      .replace('{HAIR}', sanitizeText_(c.hair, 60) || '未選択')
+      .replace('{MAKEUP}', sanitizeText_(c.makeup, 200) || '未選択')
+      .replace('{REQUEST}', sanitizeText_(c.request, 200) || '特になし')
+      .replace('{HINTS}', (Array.isArray(c.hints) ? c.hints : []).map(function (h) { return sanitizeText_(h, 60); }).join('、') || 'なし');
+    const res = callGemini_(prop_('GEMINI_TEXT_MODEL'), {
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      generationConfig: { responseMimeType: 'application/json', temperature: 0.7 },
+    });
+    try {
+      const j = JSON.parse(extractText_(res).replace(/```json|```/g, '').trim());
+      topics = (j.topics || []).slice(0, 4).map(function (t) {
+        return { title: sanitizeText_(t.title, 40), query: sanitizeText_(t.query, 100), reason: sanitizeText_(t.reason, 80) };
+      }).filter(function (t) { return t.query; });
+    } catch (e) {
+      throw new Error('AIのおすすめを読み取れませんでした。もう一度お試しください。');
+    }
+    if (!topics.length) throw new Error('おすすめのテーマを作れませんでした。');
+  }
+
+  const key = prop_('YOUTUBE_API_KEY');
+  const kind = req.kind === 'short' ? 'short' : 'long';
+  const out = topics.map(function (t) {
+    return Object.assign({}, t, { title: t.title || t.query, videos: key ? ytSearch_(t.query, 3, key, kind) : [] });
+  });
+  log_(s.userId, 'recommendVideos', topics.map(function (t) { return t.query; }).join(' / ').slice(0, 200));
+  return { available: !!key, kind: kind, topics: out };
 }
 
 function history_(req) {

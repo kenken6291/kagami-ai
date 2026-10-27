@@ -5,7 +5,7 @@
 window.CONFIG = {
   APP_NAME: 'かがみAI',
   APP_SUBTITLE: 'ヘア＆メイク試着室',
-  VERSION: 'v1.1.0',
+  VERSION: 'v1.3.0',
 
   // GASウェブアプリのURL（デプロイ後に表示される …/exec のURL）
   GAS_ENDPOINT: 'https://script.google.com/macros/s/AKfycbybkQgdG4a9qMdUOg3421jSmaAvYSN5zJ6dzBVybL86WwK6aiCNweBRnB7AH-HaO8Xa/exec',

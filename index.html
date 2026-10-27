@@ -99,7 +99,7 @@
             <summary>免責事項</summary>
             <div class="terms">
               <p>AIによる分析・提案・画像は参考情報であり、正確さや仕上がりを保証するものではありません。実際の施術やメイクの結果とは異なります。</p>
-              <p>紹介する動画は外部サービス（YouTube・TikTok）のものであり、その内容について運営者は責任を負いません。</p>
+              <p>紹介する動画は外部サービス（YouTube）のものであり、その内容について運営者は責任を負いません。</p>
               <p>本サービスの利用、または利用できなかったことにより生じた損害について、運営者は責任を負いません。</p>
             </div>
           </details>
@@ -389,12 +389,38 @@
       <!-- 7. 動画 -->
       <section class="step" id="step-videos" aria-labelledby="h-videos">
         <div class="step-head"><span class="step-no" aria-hidden="true">7</span><h2 id="h-videos">動画でやり方を学ぶ</h2></div>
-        <p id="videos-empty" class="lead">分析すると、提案に合ったメイク方法・ヘアセット術の動画をYouTubeとTikTokで並べて表示します。</p>
+        <p class="lead">分析結果と、いま選んでいる髪型・メイクに合った「やり方動画」をAIが選びます。通常の動画とショート動画を切り替えて、一覧から見たい動画を選んでください。</p>
+        <div class="row-actions">
+          <button type="button" id="video-reco-btn" class="btn btn-primary">AIのおすすめ動画を表示</button>
+        </div>
+        <p id="video-status" class="live" aria-live="polite"></p>
+
+        <div id="video-area" class="video-area" hidden>
+          <div class="video-player">
+            <div id="video-frame" class="vframe"><p class="muted">一覧から動画を選ぶと、ここで再生します。</p></div>
+            <h3 id="video-title" class="video-title"></h3>
+            <p id="video-meta" class="video-meta"></p>
+            <div class="vactions">
+              <a id="video-open-yt" class="link" href="#" target="_blank" rel="noopener" hidden>YouTubeで開く</a>
+            </div>
+          </div>
+
+          <div class="video-picker">
+            <h3>動画の種類</h3>
+            <div id="video-kind" class="chips" role="group" aria-label="動画の種類">
+              <button type="button" class="chip" data-kind="long" aria-pressed="true">通常の動画</button>
+              <button type="button" class="chip" data-kind="short" aria-pressed="false">ショート動画</button>
+            </div>
+            <h3>AIのおすすめテーマ</h3>
+            <div id="video-topics" class="chips" role="group" aria-label="テーマで絞り込む"></div>
+            <ul id="video-list" class="video-cards"></ul>
+          </div>
+        </div>
+
         <div class="free-search">
           <input type="search" id="video-free-input" maxlength="100" placeholder="自分で探す（例：ボブ 内巻き やり方）" aria-label="動画の検索ワード">
           <button type="button" id="video-free-btn" class="btn btn-ghost">探す</button>
         </div>
-        <div id="video-list" class="video-list"></div>
       </section>
     </section>
   </main>
@@ -409,7 +435,7 @@
   </div>
 
   <footer class="site-footer">
-    <p><span class="js-app-name">かがみAI</span> <span class="js-version">v1.1.0</span></p>
+    <p><span class="js-app-name">かがみAI</span> <span class="js-version">v1.3.0</span></p>
     <p class="muted">AIの提案は参考情報です。<small class="js-earth-credit"></small></p>
   </footer>
 
@@ -422,7 +448,7 @@
       <li><strong>髪型とメイクを試す</strong>髪型を選んで「この髪型を試す」。メイクは雰囲気や「鼻を高く見せる」などの印象を選ぶか、言葉で指示できます。スライダーで前後を比べられます。</li>
       <li><strong>ヘア＋メイクで仕上がりを見る</strong>試した髪型に選んだメイクを重ねた完成イメージを、元の写真と比べたり、ビフォーアフター画像として保存したりできます。</li>
       <li><strong>ギャラリーで見比べる</strong>「ギャラリーに保存」した組み合わせを一覧から選んで、並べたりスライダーで見比べたりできます。</li>
-      <li><strong>動画で学ぶ</strong>提案に合ったメイク方法やヘアセット術を、YouTubeとTikTokで並べて見られます。</li>
+      <li><strong>動画で学ぶ</strong>AIが、あなたの髪型・メイクに合ったやり方動画（通常・ショート）を一覧にします。見たい動画を選ぶと再生できます。</li>
     </ol>
     <details class="voice-help">
       <summary>話して操作できる言葉</summary>

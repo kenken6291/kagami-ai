@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>かがみAI ～ヘア＆メイク試着室</title>
+  <meta name="description" content="顔写真から、似合う髪型とメイクをAIが提案。髪型の変更やバーチャルメイクを試して、参考動画で学べます。">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🪞</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Shippori+Mincho+B1:wght@500;700&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Google Earth Studio 背景動画 -->
+  <video id="bg-video" class="bg-video" muted loop playsinline preload="auto" aria-hidden="true" hidden></video>
+
+  <!-- オープニング（Google Earth Studio） -->
+  <div id="opening" class="opening" hidden>
+    <video id="opening-video" muted playsinline preload="auto"></video>
+    <p class="opening-title"><span class="js-app-name">かがみAI</span></p>
+    <button type="button" id="opening-skip" class="btn btn-ghost opening-skip">スキップ</button>
+    <small class="earth-credit js-earth-credit"></small>
+  </div>
+
+  <header class="site-header">
+    <div class="brand">
+      <h1 id="app-name" class="wordmark">かがみAI</h1>
+      <p id="app-sub" class="tagline">ヘア＆メイク試着室</p>
+    </div>
+    <div id="user-area" class="user-area" hidden>
+      <span id="user-name" class="user-name"></span>
+      <button type="button" id="menu-btn" class="btn btn-ghost btn-small" aria-haspopup="true" aria-expanded="false" aria-controls="menu">メニュー</button>
+      <nav id="menu" class="menu" hidden>
+        <button type="button" id="menu-guide">使い方</button>
+        <button type="button" id="menu-history">診断の履歴</button>
+        <button type="button" id="menu-password">パスワードを変更</button>
+        <button type="button" id="menu-delete-images">保存された写真を削除</button>
+        <button type="button" id="menu-logout">ログアウト</button>
+      </nav>
+    </div>
+  </header>
+
+  <main id="app">
+    <!-- ===== ログイン ===== -->
+    <section data-view="login" class="auth" hidden>
+      <h2>ログイン</h2>
+      <form id="login-form" class="form" novalidate>
+        <label>メールアドレス
+          <input type="email" id="login-email" autocomplete="email" required>
+        </label>
+        <label>パスワード
+          <span class="pw-wrap">
+            <input type="password" id="login-password" autocomplete="current-password" required>
+            <button type="button" class="pw-toggle" data-target="login-password" aria-pressed="false" aria-label="パスワードを表示">
+              <svg class="eye-on" viewBox="0 0 24 24" aria-hidden="true"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg>
+              <svg class="eye-off" viewBox="0 0 24 24" aria-hidden="true"><path d="M17.9 17.9A10.8 10.8 0 0 1 12 19C5 19 1 12 1 12a19.8 19.8 0 0 1 5.1-5.9M9.9 5.2A10 10 0 0 1 12 5c7 0 11 7 11 7a19.6 19.6 0 0 1-2.2 3.2M14.1 14.1a3 3 0 1 1-4.2-4.2"/><path d="M1 1l22 22"/></svg>
+            </button>
+          </span>
+        </label>
+        <button type="submit" class="btn btn-primary">ログイン</button>
+      </form>
+      <p class="auth-links">
+        <button type="button" id="to-register" class="link">はじめての方は会員登録</button>
+        <button type="button" id="to-forgot" class="link">パスワードを忘れた方</button>
+      </p>
+    </section>
+
+    <!-- ===== 会員登録 ===== -->
+    <section data-view="register" class="auth" hidden>
+      <h2>会員登録</h2>
+      <p class="lead">登録すると、メールに仮パスワードが届きます。</p>
+      <form id="register-form" class="form" novalidate>
+        <label>メールアドレス
+          <input type="email" id="reg-email" autocomplete="email" required>
+        </label>
+        <label>ニックネーム（20文字まで）
+          <input type="text" id="reg-nickname" maxlength="20" autocomplete="nickname" required>
+        </label>
+
+        <fieldset class="agreements">
+          <legend>ご利用前に、次の4つをお読みください</legend>
+
+          <details>
+            <summary>利用規約</summary>
+            <div class="terms">
+              <p>本サービスは、顔写真をもとに髪型・メイクの提案やシミュレーションを行う無料の個人運営サービスです。</p>
+              <p>アップロードした写真は、分析と画像生成のためにGoogleのAI（Gemini）へ送信されます。写真は運営者のGoogleドライブに一時保存され、7日を過ぎると自動で削除されます。メニューの「保存された写真を削除」からいつでも削除できます。</p>
+              <p>ご本人の写真、または写っている方の同意を得た写真のみを使用してください。他人を傷つける目的、法令や公序良俗に反する目的での利用は禁止します。</p>
+              <p>運営者は、予告なくサービス内容の変更・停止を行うことがあります。</p>
+            </div>
+          </details>
+          <label class="check"><input type="checkbox" class="agree" id="agree-terms"> 利用規約に同意します</label>
+
+          <details>
+            <summary>免責事項</summary>
+            <div class="terms">
+              <p>AIによる分析・提案・画像は参考情報であり、正確さや仕上がりを保証するものではありません。実際の施術やメイクの結果とは異なります。</p>
+              <p>紹介する動画は外部サービス（YouTube・TikTok）のものであり、その内容について運営者は責任を負いません。</p>
+              <p>本サービスの利用、または利用できなかったことにより生じた損害について、運営者は責任を負いません。</p>
+            </div>
+          </details>
+          <label class="check"><input type="checkbox" class="agree" id="agree-disclaimer"> 免責事項に同意します</label>
+
+          <details>
+            <summary>自己責任の原則</summary>
+            <div class="terms">
+              <p>本サービスの提案を参考に、美容院の予約・化粧品の購入・施術などを行う場合は、ご自身の判断と責任で行ってください。</p>
+              <p>肌に合わない化粧品やヘアカラーの使用には十分ご注意ください。</p>
+            </div>
+          </details>
+          <label class="check"><input type="checkbox" class="agree" id="agree-self"> 自己責任の原則に同意します</label>
+
+          <details>
+            <summary>当事者間での問題解決について</summary>
+            <div class="terms">
+              <p>本サービスで得た画像や情報を第三者と共有したことで生じたトラブルは、当事者間で話し合って解決するものとし、運営者は仲介や補償を行いません。</p>
+              <p>外部サービス・美容院・販売店などとのやり取りで生じた問題も、当事者間で解決してください。</p>
+            </div>
+          </details>
+          <label class="check"><input type="checkbox" class="agree" id="agree-dispute"> 当事者間で問題を解決することに同意します</label>
+        </fieldset>
+
+        <p id="agree-hint" class="hint">4つすべてにチェックすると登録できます。</p>
+        <button type="submit" id="reg-submit" class="btn btn-primary" disabled>登録して仮パスワードを受け取る</button>
+      </form>
+      <p class="auth-links"><button type="button" class="link to-login">ログイン画面に戻る</button></p>
+    </section>
+
+    <!-- ===== パスワード再発行 ===== -->
+    <section data-view="forgot" class="auth" hidden>
+      <h2>パスワードの再発行</h2>
+      <p class="lead">登録したメールアドレスに、新しい仮パスワードを送ります。</p>
+      <form id="forgot-form" class="form" novalidate>
+        <label>メールアドレス
+          <input type="email" id="forgot-email" autocomplete="email" required>
+        </label>
+        <button type="submit" class="btn btn-primary">仮パスワードを送る</button>
+      </form>
+      <p class="auth-links"><button type="button" class="link to-login">ログイン画面に戻る</button></p>
+    </section>
+
+    <!-- ===== パスワード変更 ===== -->
+    <section data-view="change" class="auth" hidden>
+      <h2>パスワードの変更</h2>
+      <p id="change-note" class="lead">仮パスワードから、ご自身で決めたパスワードに変更してください。</p>
+      <form id="change-form" class="form" novalidate>
+        <label>現在のパスワード（仮パスワード）
+          <span class="pw-wrap">
+            <input type="password" id="cp-current" autocomplete="current-password" required>
+            <button type="button" class="pw-toggle" data-target="cp-current" aria-pressed="false" aria-label="パスワードを表示">
+              <svg class="eye-on" viewBox="0 0 24 24" aria-hidden="true"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg>
+              <svg class="eye-off" viewBox="0 0 24 24" aria-hidden="true"><path d="M17.9 17.9A10.8 10.8 0 0 1 12 19C5 19 1 12 1 12a19.8 19.8 0 0 1 5.1-5.9M9.9 5.2A10 10 0 0 1 12 5c7 0 11 7 11 7a19.6 19.6 0 0 1-2.2 3.2M14.1 14.1a3 3 0 1 1-4.2-4.2"/><path d="M1 1l22 22"/></svg>
+            </button>
+          </span>
+        </label>
+        <label>新しいパスワード（8文字以上・英字と数字を含む）
+          <span class="pw-wrap">
+            <input type="password" id="cp-new" autocomplete="new-password" required>
+            <button type="button" class="pw-toggle" data-target="cp-new" aria-pressed="false" aria-label="パスワードを表示">
+              <svg class="eye-on" viewBox="0 0 24 24" aria-hidden="true"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg>
+              <svg class="eye-off" viewBox="0 0 24 24" aria-hidden="true"><path d="M17.9 17.9A10.8 10.8 0 0 1 12 19C5 19 1 12 1 12a19.8 19.8 0 0 1 5.1-5.9M9.9 5.2A10 10 0 0 1 12 5c7 0 11 7 11 7a19.6 19.6 0 0 1-2.2 3.2M14.1 14.1a3 3 0 1 1-4.2-4.2"/><path d="M1 1l22 22"/></svg>
+            </button>
+          </span>
+        </label>
+        <label>新しいパスワード（確認）
+          <span class="pw-wrap">
+            <input type="password" id="cp-confirm" autocomplete="new-password" required>
+            <button type="button" class="pw-toggle" data-target="cp-confirm" aria-pressed="false" aria-label="パスワードを表示">
+              <svg class="eye-on" viewBox="0 0 24 24" aria-hidden="true"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg>
+              <svg class="eye-off" viewBox="0 0 24 24" aria-hidden="true"><path d="M17.9 17.9A10.8 10.8 0 0 1 12 19C5 19 1 12 1 12a19.8 19.8 0 0 1 5.1-5.9M9.9 5.2A10 10 0 0 1 12 5c7 0 11 7 11 7a19.6 19.6 0 0 1-2.2 3.2M14.1 14.1a3 3 0 1 1-4.2-4.2"/><path d="M1 1l22 22"/></svg>
+            </button>
+          </span>
+        </label>
+        <button type="submit" class="btn btn-primary">パスワードを変更</button>
+        <button type="button" id="cp-cancel" class="btn btn-ghost" hidden>変更せずに戻る</button>
+      </form>
+    </section>
+
+    <!-- ===== メイン ===== -->
+    <section data-view="main" class="studio" hidden>
+
+      <!-- 1. 写真 -->
+      <section class="step" id="step-photo" aria-labelledby="h-photo">
+        <div class="step-head"><span class="step-no" aria-hidden="true">1</span><h2 id="h-photo">写真をセットする</h2></div>
+        <p class="lead">正面を向いた、明るい場所の写真がおすすめです。</p>
+        <div class="row-actions">
+          <button type="button" id="cam-start" class="btn btn-primary">カメラで撮る</button>
+          <label class="btn btn-ghost file-btn">写真を選ぶ<input type="file" id="upload-input" accept="image/jpeg,image/png,image/webp" hidden></label>
+        </div>
+
+        <div id="cam-wrap" class="cam" hidden>
+          <div class="mirror"><video id="cam-video" playsinline muted></video></div>
+          <div class="row-actions center">
+            <button type="button" id="cam-shoot" class="btn btn-primary btn-large">撮影する</button>
+            <button type="button" id="cam-cancel" class="btn btn-ghost">やめる</button>
+          </div>
+        </div>
+
+        <div id="photo-mirror" class="mirror mirror-photo">
+          <img id="photo-preview" alt="セットした写真">
+          <p id="photo-empty" class="mirror-empty">ここに写真が映ります</p>
+        </div>
+      </section>
+
+      <!-- 2. 分析 -->
+      <section class="step" id="step-analyze" aria-labelledby="h-analyze">
+        <div class="step-head"><span class="step-no" aria-hidden="true">2</span><h2 id="h-analyze">AIに分析してもらう</h2></div>
+        <label for="request-input" class="field-label">要望があれば書いてください（話しても入力できます）</label>
+        <div class="input-mic">
+          <textarea id="request-input" rows="2" maxlength="300" placeholder="例：手入れが楽で、若々しく見える髪型にしたい"></textarea>
+          <button type="button" id="request-mic" class="mic" aria-pressed="false" aria-label="音声で入力">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 17v5M8 22h8"/></svg>
+          </button>
+        </div>
+        <p id="request-live" class="live" aria-live="polite"></p>
+        <button type="button" id="analyze-btn" class="btn btn-primary" disabled>AIに分析してもらう</button>
+
+        <div id="analysis" class="analysis" hidden>
+          <dl class="facts">
+            <div><dt>顔の形</dt><dd><strong id="a-face"></strong><span id="a-face-reason"></span></dd></div>
+            <div><dt>パーソナルカラーの傾向</dt><dd><strong id="a-color"></strong><span id="a-color-reason"></span></dd></div>
+          </dl>
+          <h3>顔立ちの特徴</h3>
+          <ul id="a-features" class="features"></ul>
+          <h3>AIの解説</h3>
+          <p id="a-narration" class="narration"></p>
+          <div class="row-actions">
+            <button type="button" id="narrate-btn" class="btn btn-ghost">解説を聞く</button>
+            <button type="button" id="narrate-stop" class="btn btn-ghost" hidden>止める</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- 3. ヘア -->
+      <section class="step" id="step-hair" aria-labelledby="h-hair">
+        <div class="step-head"><span class="step-no" aria-hidden="true">3</span><h2 id="h-hair">髪型を試す</h2></div>
+        <div id="hair-ai-wrap" hidden>
+          <h3>AIのおすすめ</h3>
+          <div id="hair-ai" class="chips"></div>
+        </div>
+        <h3>髪型</h3>
+        <div id="hair-styles" class="chips"></div>
+        <h3>髪色</h3>
+        <div id="hair-colors" class="chips"></div>
+        <label for="hair-extra" class="field-label">細かい希望（任意）</label>
+        <input type="text" id="hair-extra" maxlength="200" placeholder="例：前髪は眉の下まで">
+        <p class="selected">選んでいる髪型：<strong id="hair-selected">未選択</strong></p>
+        <button type="button" id="hair-btn" class="btn btn-primary" disabled>この髪型を試す</button>
+
+        <div id="hair-compare" class="compare mirror">
+          <img class="cmp-before" alt="変更前">
+          <div class="cmp-after"><img alt="髪型を変えた写真"></div>
+          <div class="cmp-handle" aria-hidden="true"></div>
+          <input type="range" class="cmp-range" min="0" max="100" value="50" aria-label="変更前と変更後の比較位置">
+          <span class="cmp-tag cmp-tag-l">前</span><span class="cmp-tag cmp-tag-r">後</span>
+          <p class="mirror-empty">髪型を試すと、ここで前後を比べられます</p>
+        </div>
+        <div id="hair-result-actions" class="row-actions center" hidden>
+          <button type="button" class="btn btn-ghost btn-small side-toggle" data-target="hair-compare" aria-pressed="false">並べて比べる</button>
+          <button type="button" id="hair-save" class="btn btn-ghost btn-small">画像を保存</button>
+        </div>
+      </section>
+
+      <!-- 4. メイク -->
+      <section class="step" id="step-makeup" aria-labelledby="h-makeup">
+        <div class="step-head"><span class="step-no" aria-hidden="true">4</span><h2 id="h-makeup">メイクを試す</h2></div>
+        <fieldset class="base-choice">
+          <legend>メイクをのせる写真</legend>
+          <label><input type="radio" name="makeup-base" value="original" checked> 元の写真</label>
+          <label><input type="radio" name="makeup-base" value="hair" disabled> 髪型を変えた写真</label>
+        </fieldset>
+
+        <div class="makeup-grid">
+          <div class="makeup-controls">
+            <div class="mk-part">
+              <h3>リップ</h3>
+              <div id="mk-lip" class="swatches"></div>
+              <label class="amt">濃さ <input type="range" id="mk-lip-amt" min="0" max="100" value="55"></label>
+            </div>
+            <div class="mk-part">
+              <h3>アイシャドウ</h3>
+              <div id="mk-eye" class="swatches"></div>
+              <label class="amt">濃さ <input type="range" id="mk-eye-amt" min="0" max="100" value="45"></label>
+            </div>
+            <div class="mk-part">
+              <h3>チーク</h3>
+              <div id="mk-cheek" class="swatches"></div>
+              <label class="amt">濃さ <input type="range" id="mk-cheek-amt" min="0" max="100" value="40"></label>
+            </div>
+            <p id="mk-tips" class="tips" hidden></p>
+            <div class="row-actions">
+              <button type="button" id="mk-apply-ai" class="btn btn-ghost btn-small" hidden>AIのおすすめ色をつける</button>
+              <button type="button" id="mk-reset" class="btn btn-ghost btn-small">メイクを消す</button>
+            </div>
+          </div>
+
+          <div>
+            <div id="makeup-compare" class="compare mirror">
+              <img class="cmp-before" alt="メイク前">
+              <div class="cmp-after"><canvas id="makeup-canvas" role="img" aria-label="メイクをのせた写真"></canvas></div>
+              <div class="cmp-handle" aria-hidden="true"></div>
+              <input type="range" class="cmp-range" min="0" max="100" value="50" aria-label="メイク前とメイク後の比較位置">
+              <span class="cmp-tag cmp-tag-l">前</span><span class="cmp-tag cmp-tag-r">後</span>
+              <p class="mirror-empty">写真をセットすると、ここでメイクを試せます</p>
+            </div>
+            <p id="makeup-status" class="live" aria-live="polite"></p>
+            <div class="row-actions center">
+              <button type="button" class="btn btn-ghost btn-small side-toggle" data-target="makeup-compare" aria-pressed="false">並べて比べる</button>
+              <button type="button" id="mk-save" class="btn btn-ghost btn-small">画像を保存</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 5. 動画 -->
+      <section class="step" id="step-videos" aria-labelledby="h-videos">
+        <div class="step-head"><span class="step-no" aria-hidden="true">5</span><h2 id="h-videos">動画でやり方を学ぶ</h2></div>
+        <p id="videos-empty" class="lead">分析すると、提案に合ったメイク方法・ヘアセット術の動画をYouTubeとTikTokで並べて表示します。</p>
+        <div class="free-search">
+          <input type="search" id="video-free-input" maxlength="100" placeholder="自分で探す（例：ボブ 内巻き やり方）" aria-label="動画の検索ワード">
+          <button type="button" id="video-free-btn" class="btn btn-ghost">探す</button>
+        </div>
+        <div id="video-list" class="video-list"></div>
+      </section>
+    </section>
+  </main>
+
+  <!-- 音声操作 -->
+  <div class="voice-dock" id="voice-dock" hidden>
+    <p id="voice-status" class="voice-status" aria-live="polite" hidden></p>
+    <button type="button" id="voice-cmd" class="voice-btn" aria-pressed="false" aria-label="音声で操作">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 17v5M8 22h8"/></svg>
+      <span>話して操作</span>
+    </button>
+  </div>
+
+  <footer class="site-footer">
+    <p><span class="js-app-name">かがみAI</span> <span class="js-version">v1.0.0</span></p>
+    <p class="muted">AIの提案は参考情報です。<small class="js-earth-credit"></small></p>
+  </footer>
+
+  <!-- 使い方ガイド -->
+  <dialog id="guide" class="dialog" aria-labelledby="guide-title">
+    <h2 id="guide-title">使い方</h2>
+    <ol class="guide-steps">
+      <li><strong>写真をセット</strong>「カメラで撮る」か「写真を選ぶ」。正面・明るい場所がおすすめです。</li>
+      <li><strong>AIに分析してもらう</strong>顔の形やパーソナルカラーの傾向から、似合う髪型とメイクを提案します。解説は音声でも聞けます。</li>
+      <li><strong>髪型とメイクを試す</strong>髪型を選んで「この髪型を試す」。メイクは色を選ぶだけ。スライダーで前後を比べられます。</li>
+      <li><strong>動画で学ぶ</strong>提案に合ったメイク方法やヘアセット術を、YouTubeとTikTokで並べて見られます。</li>
+    </ol>
+    <details class="voice-help">
+      <summary>話して操作できる言葉</summary>
+      <p>「カメラ」「撮影」「分析して」「解説を読んで」「止めて」「ボブにして」など髪型の名前、「メイク」「動画」「使い方」。それ以外の言葉は要望欄に入ります。</p>
+    </details>
+    <form method="dialog"><button class="btn btn-primary">はじめる</button></form>
+  </dialog>
+
+  <!-- 履歴 -->
+  <dialog id="history-dlg" class="dialog" aria-labelledby="history-title">
+    <h2 id="history-title">診断の履歴</h2>
+    <ul id="history-list" class="history-list"></ul>
+    <form method="dialog"><button class="btn btn-ghost">閉じる</button></form>
+  </dialog>
+
+  <div id="loading" class="loading" hidden role="status">
+    <div class="loading-mirror" aria-hidden="true"></div>
+    <p id="loading-text">処理しています…</p>
+  </div>
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+  <script src="config.js"></script>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

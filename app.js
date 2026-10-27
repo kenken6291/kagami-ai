@@ -1149,13 +1149,21 @@ function bindMain() {
 }
 
 function init() {
-  applyConfig();
-  setupEarthStudio();
-  setupPasswordToggles();
-  bindAuth();
-  bindMenu();
-  bindMain();
-  restoreSession();
+  window.__kagamiStarted = true;
+  try {
+    if (!C) throw new Error('config.js が読み込まれていません。');
+    applyConfig();
+    setupEarthStudio();
+    setupPasswordToggles();
+    bindAuth();
+    bindMenu();
+    bindMain();
+  } catch (e) {
+    console.error(e);
+    window.__kagamiBoot?.fail('起動中にエラーが発生しました：' + e.message);
+  }
+  // 途中で失敗してもログイン画面は必ず出す
+  restoreSession().catch(() => showView('login'));
 }
 
 init();

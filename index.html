@@ -42,6 +42,9 @@
   </header>
 
   <main id="app">
+    <!-- 起動エラー表示（JSが読み込めない・止まったときだけ表示） -->
+    <div id="boot-error" class="boot-error" role="alert" hidden></div>
+
     <!-- ===== ログイン ===== -->
     <section data-view="login" class="auth" hidden>
       <h2>ログイン</h2>
@@ -369,7 +372,22 @@
   </div>
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
-  <script src="config.js"></script>
-  <script type="module" src="app.js"></script>
+  <script>
+    // 起動チェック：config.js / app.js が読み込めない・途中で止まった場合に原因を表示
+    window.__kagamiBoot = {
+      fail: function (msg) {
+        var b = document.getElementById('boot-error');
+        if (!b) return;
+        b.hidden = false;
+        b.innerHTML = '<strong>画面を表示できませんでした。</strong><br>' + msg +
+          '<br><small>GitHubに index.html・app.js・style.css・config.js が同じ場所にあるか確認し、Ctrl+F5（スマホは再読み込み）をお試しください。</small>';
+      }
+    };
+    setTimeout(function () {
+      if (!window.__kagamiStarted) window.__kagamiBoot.fail('app.js が動いていません（ファイルが無いか、読み込みに失敗しています）。');
+    }, 5000);
+  </script>
+  <script src="config.js" onerror="window.__kagamiBoot.fail('config.js が見つかりません。')"></script>
+  <script type="module" src="app.js" onerror="window.__kagamiBoot.fail('app.js が見つかりません。')"></script>
 </body>
 </html>

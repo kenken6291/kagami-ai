@@ -95,6 +95,10 @@ button, input, textarea, select { font: inherit; color: inherit; }
 .menu button { text-align: left; background: none; border: 0; padding: 10px 12px; border-radius: 6px; cursor: pointer; }
 .menu button:hover { background: var(--glass); }
 
+.boot-error {
+  max-width: 560px; margin: 24px auto; padding: 16px 18px; border-radius: var(--radius);
+  border: 2px solid var(--rouge); background: var(--surface); line-height: 1.7;
+}
 main { max-width: 920px; margin: 0 auto; padding: 8px 20px 120px; }
 
 /* ---------- ボタン・入力 ---------- */

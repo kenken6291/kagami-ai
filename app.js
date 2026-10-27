@@ -118,11 +118,28 @@ function resizeToDataUrl(src) {
   return cv.toDataURL('image/jpeg', C.IMAGE.QUALITY);
 }
 
-function downloadDataUrl(url, name) {
-  const a = el('a', { href: url, download: name });
+/** 画像を保存（毎回ちがうファイル名にして「再ダウンロード」確認を出さない） */
+async function downloadDataUrl(url, name) {
+  const dot = name.lastIndexOf('.');
+  const base = dot > 0 ? name.slice(0, dot) : name;
+  const ext = dot > 0 ? name.slice(dot) : '.jpg';
+  const d = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  const stamp = `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+  const fileName = `${base}-${stamp}${ext}`;
+  let href = url;
+  let revoke = null;
+  try {
+    const blob = await (await fetch(url)).blob(); // dataURLをBlobに変換（スマホで安定）
+    href = URL.createObjectURL(blob);
+    revoke = href;
+  } catch (e) { /* dataURLのまま保存 */ }
+  const a = el('a', { href, download: fileName });
   document.body.append(a);
   a.click();
   a.remove();
+  if (revoke) setTimeout(() => URL.revokeObjectURL(revoke), 10000);
+  toast(`「${fileName}」を保存しました。`, 'success');
 }
 
 function hexToRgba(hex, a) {
@@ -1222,7 +1239,7 @@ function bindMain() {
 
   renderHairPresets();
   $('#hair-btn').addEventListener('click', tryHair);
-  $('#hair-save').addEventListener('click', () => state.hairResult && downloadDataUrl(state.hairResult, 'kagami-hair.png'));
+  $('#hair-save').addEventListener('click', () => state.hairResult && downloadDataUrl(state.hairResult, state.hairResult.startsWith('data:image/png') ? 'kagami-hair.png' : 'kagami-hair.jpg'));
 
   renderMakeupControls();
   $$('input[name="makeup-base"]').forEach(r => r.addEventListener('change', prepareMakeup));

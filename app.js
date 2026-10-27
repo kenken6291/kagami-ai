@@ -13,11 +13,11 @@ const state = {
   hairResult: null,     // dataURL
   analysis: null,
   historyId: null,
-  hair: { style: '', label: '', color: '' },
+  hair: { style: '', label: '', color: '', appliedLabel: '' },
   makeup: {
-    lip: { color: null, amount: 0.55 },
-    eye: { color: null, amount: 0.45 },
-    cheek: { color: null, amount: 0.40 },
+    lip: { color: null, name: '', amount: 0.55 },
+    eye: { color: null, name: '', amount: 0.45 },
+    cheek: { color: null, name: '', amount: 0.40 },
   },
   baseImgs: {},                              // { original: Image, hair: Image }
   landmarks: { original: null, hair: null }, // null=未検出 / false=顔なし / 配列
@@ -461,8 +461,11 @@ function setPhoto(dataUrl) {
   hairBase.disabled = true;
   $('input[name="makeup-base"][value="original"]').checked = true;
 
+  state.hair.appliedLabel = '';
+
   toast('写真をセットしました。次は「AIに分析してもらう」です。', 'success');
   prepareMakeup();
+  prepareSet();
 }
 
 /* =========================================================
@@ -556,9 +559,14 @@ async function tryHair() {
   state.hairResult = `data:${r.mimeType};base64,${r.image}`;
   state.landmarks.hair = null;
   delete state.baseImgs.hair;
+  state.hair.appliedLabel = state.hair.label;
   await setCompare($('#hair-compare'), state.original, state.hairResult);
   $('#hair-result-actions').hidden = false;
-  $('input[name="makeup-base"][value="hair"]').disabled = false;
+  const hairBase = $('input[name="makeup-base"][value="hair"]');
+  hairBase.disabled = false;
+  hairBase.checked = true; // メイクは新しい髪型の写真にのせる
+  prepareMakeup();
+  prepareSet();
   $('#hair-compare').scrollIntoView({ behavior: 'smooth', block: 'center' });
   toast('鏡の上を左右になぞると、前後を比べられます。', 'success');
 }
@@ -630,6 +638,16 @@ async function getBaseImg(key) {
   return state.baseImgs[key];
 }
 
+/** 顔の点を検出（写真ごとに1回だけ）。失敗時は例外 */
+async function ensureLandmarks(key) {
+  const img = await getBaseImg(key);
+  if (state.landmarks[key] == null) {
+    const lm = await getLandmarker();
+    state.landmarks[key] = lm.detect(img).faceLandmarks?.[0] || false;
+  }
+  return img;
+}
+
 async function prepareMakeup() {
   if (!state.original) return;
   const key = currentBase();
@@ -642,15 +660,12 @@ async function prepareMakeup() {
   box.classList.add('is-ready');
 
   let msg = '色を選ぶと、すぐにメイクが反映されます。';
-  if (state.landmarks[key] == null) {
-    status.textContent = '顔の位置を読み取っています…';
-    try {
-      const lm = await getLandmarker();
-      state.landmarks[key] = lm.detect(img).faceLandmarks?.[0] || false;
-    } catch (e) {
-      console.error(e);
-      msg = 'メイク機能を読み込めませんでした。通信状態を確認して、もう一度写真をセットしてください。';
-    }
+  if (state.landmarks[key] == null) status.textContent = '顔の位置を読み取っています…';
+  try {
+    await ensureLandmarks(key);
+  } catch (e) {
+    console.error(e);
+    msg = 'メイク機能を読み込めませんでした。通信状態を確認して、もう一度写真をセットしてください。';
   }
   if (state.landmarks[key] === false) msg = '顔を見つけられませんでした。正面を向いた明るい写真でお試しください。';
   if (key === currentBase()) {
@@ -662,15 +677,18 @@ async function prepareMakeup() {
 function renderMakeup() {
   const key = currentBase();
   const img = state.baseImgs[key];
-  if (!img) return;
-  const cv = $('#makeup-canvas');
+  if (img) drawMakeup($('#makeup-canvas'), img, state.landmarks[key]);
+  renderSet();
+}
+
+/** 写真にメイクを重ねてキャンバスに描く */
+function drawMakeup(cv, img, lm) {
   cv.width = img.naturalWidth;
   cv.height = img.naturalHeight;
   const ctx = cv.getContext('2d');
   ctx.drawImage(img, 0, 0);
-
-  const lm = state.landmarks[key];
   if (!lm) return;
+
   const W = cv.width, H = cv.height;
   const P = i => ({ x: lm[i].x * W, y: lm[i].y * H });
   const faceW = Math.hypot(P(454).x - P(234).x, P(454).y - P(234).y);
@@ -703,6 +721,87 @@ function renderMakeup() {
     paint(ctx, { fill: m.lip.color, alpha: m.lip.amount * 0.55, mode: 'multiply', blur, path });
     paint(ctx, { fill: m.lip.color, alpha: m.lip.amount * 0.35, mode: 'soft-light', blur, path });
   }
+}
+
+/* ---------- 5. ヘア＋メイク セット ---------- */
+const MAKEUP_LABELS = [['lip', 'リップ'], ['eye', 'アイシャドウ'], ['cheek', 'チーク']];
+
+function setSummaryText() {
+  const m = state.makeup;
+  const parts = MAKEUP_LABELS.filter(([p]) => m[p].color).map(([p, l]) => `${l}：${m[p].name}`);
+  return `髪型：${state.hair.appliedLabel || '—'}／` + (parts.length ? parts.join('／') : 'メイク：なし');
+}
+
+async function prepareSet() {
+  const box = $('#set-compare');
+  const status = $('#set-status');
+  if (!state.hairResult) {
+    resetCompare(box);
+    $('#set-actions').hidden = true;
+    $('#set-summary').textContent = '';
+    status.textContent = '';
+    return;
+  }
+  const orig = await getBaseImg('original');
+  const hair = await getBaseImg('hair');
+  $('.cmp-before', box).src = orig.src;
+  box.style.aspectRatio = `${hair.naturalWidth} / ${hair.naturalHeight}`;
+  box.classList.add('is-ready');
+  $('#set-actions').hidden = false;
+  renderSet();
+  if (state.landmarks.hair == null) {
+    status.textContent = '顔の位置を読み取っています…';
+    try { await ensureLandmarks('hair'); } catch (e) { console.error(e); }
+    renderSet();
+  }
+}
+
+function renderSet() {
+  const img = state.baseImgs.hair;
+  if (!state.hairResult || !img) return;
+  const lm = state.landmarks.hair;
+  drawMakeup($('#set-canvas'), img, lm);
+  $('#set-summary').textContent = setSummaryText();
+  const status = $('#set-status');
+  const noMakeup = MAKEUP_LABELS.every(([p]) => !state.makeup[p].color);
+  if (lm === false) status.textContent = '髪型を変えた写真から顔を見つけられなかったため、メイクはのせていません。';
+  else if (lm == null) status.textContent = '顔の位置を読み取っています…';
+  else status.textContent = noMakeup ? '4でメイクの色を選ぶと、ここにも重なります。' : '';
+}
+
+/** 「いま」と「ヘア＋メイク」を並べた1枚の画像を保存 */
+async function saveSetImage() {
+  if (!state.hairResult) return toast('先に髪型を試してください。', 'error');
+  renderSet();
+  const orig = await getBaseImg('original');
+  const fin = $('#set-canvas');
+  const H = Math.min(1024, fin.height);
+  const w1 = Math.round(orig.naturalWidth * H / orig.naturalHeight);
+  const w2 = Math.round(fin.width * H / fin.height);
+  const pad = 28, labelH = 64, footH = 72;
+  const cv = document.createElement('canvas');
+  cv.width = w1 + w2 + pad * 3;
+  cv.height = H + pad * 2 + labelH + footH;
+  const ctx = cv.getContext('2d');
+  ctx.fillStyle = '#F3F1F5';
+  ctx.fillRect(0, 0, cv.width, cv.height);
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#2A2230';
+  ctx.font = 'bold 34px "Zen Kaku Gothic New", sans-serif';
+  ctx.fillText('いま', pad, pad + labelH / 2);
+  ctx.fillStyle = '#B3264A';
+  ctx.fillText('ヘア＋メイク', pad * 2 + w1, pad + labelH / 2);
+  ctx.drawImage(orig, pad, pad + labelH, w1, H);
+  ctx.drawImage(fin, pad * 2 + w1, pad + labelH, w2, H);
+  ctx.fillStyle = '#5E5566';
+  ctx.font = '24px "Zen Kaku Gothic New", sans-serif';
+  const footY = pad + labelH + H + footH / 2;
+  ctx.fillText(setSummaryText(), pad, footY, cv.width - pad * 3 - 160);
+  ctx.textAlign = 'right';
+  ctx.font = 'bold 26px "Shippori Mincho B1", serif';
+  ctx.fillStyle = '#2A2230';
+  ctx.fillText(C.APP_NAME, cv.width - pad, footY);
+  downloadDataUrl(cv.toDataURL('image/jpeg', 0.92), 'kagami-hair-makeup.jpg');
 }
 
 function paint(ctx, { fill, alpha, mode, blur, path }) {
@@ -740,12 +839,13 @@ function swatch(part, hex, name, ai = false) {
     'aria-label': (ai ? 'AIのおすすめ ' : '') + name,
     title: (ai ? 'AIのおすすめ：' : '') + name,
   });
-  b.addEventListener('click', () => setMakeupColor(part, hex));
+  b.addEventListener('click', () => setMakeupColor(part, hex, name));
   return b;
 }
 
-function setMakeupColor(part, hex) {
+function setMakeupColor(part, hex, name = '') {
   state.makeup[part].color = hex || null;
+  state.makeup[part].name = hex ? name : '';
   $$(`.swatch[data-part="${part}"]`).forEach(s => {
     s.setAttribute('aria-pressed', String((s.dataset.hex || null) === (hex || null)));
   });
@@ -783,7 +883,7 @@ function renderAiMakeup(mk) {
 function applyAiMakeup() {
   const mk = state.analysis?.makeup;
   if (!mk) return;
-  ['lip', 'eye', 'cheek'].forEach(part => { if (isHex(mk[part]?.hex)) setMakeupColor(part, mk[part].hex); });
+  ['lip', 'eye', 'cheek'].forEach(part => { if (isHex(mk[part]?.hex)) setMakeupColor(part, mk[part].hex, mk[part].name || 'おすすめ'); });
   $('#makeup-compare').scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
@@ -1094,6 +1194,7 @@ function handleCommand(text) {
     .sort((a, b) => b.dataset.label.length - a.dataset.label.length);
   const hit = styles.find(b => t.includes(b.dataset.label));
   if (hit) { hit.click(); go('step-hair'); return tryHair(); }
+  if (/セット|仕上が|完成/.test(t)) return go('step-set');
   if (/メイク/.test(t)) return go('step-makeup');
   if (/髪型|ヘア/.test(t)) return go('step-hair');
   if (/動画/.test(t)) return go('step-videos');
@@ -1134,6 +1235,8 @@ function bindMain() {
 
   setupCompare($('#hair-compare'));
   setupCompare($('#makeup-compare'));
+  setupCompare($('#set-compare'));
+  $('#set-save').addEventListener('click', saveSetImage);
   bindSideToggles();
 
   $('#video-free-btn').addEventListener('click', freeVideoSearch);

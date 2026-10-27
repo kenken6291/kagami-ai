@@ -316,9 +316,29 @@
         </div>
       </section>
 
-      <!-- 5. 動画 -->
+      <!-- 5. ヘア＋メイク セット -->
+      <section class="step" id="step-set" aria-labelledby="h-set">
+        <div class="step-head"><span class="step-no" aria-hidden="true">5</span><h2 id="h-set">ヘア＋メイクで仕上がりを見る</h2></div>
+        <p class="lead">試した髪型に、選んだメイクを重ねた完成イメージです。メイクの色を変えると、ここにもすぐ反映されます。</p>
+        <p id="set-summary" class="set-summary"></p>
+        <div id="set-compare" class="compare mirror">
+          <img class="cmp-before" alt="元の写真">
+          <div class="cmp-after"><canvas id="set-canvas" role="img" aria-label="髪型とメイクを合わせた写真"></canvas></div>
+          <div class="cmp-handle" aria-hidden="true"></div>
+          <input type="range" class="cmp-range" min="0" max="100" value="50" aria-label="元の写真と完成イメージの比較位置">
+          <span class="cmp-tag cmp-tag-l">いま</span><span class="cmp-tag cmp-tag-r">ヘア＋メイク</span>
+          <p class="mirror-empty">3で髪型を試すと、ここにセットの完成イメージが映ります</p>
+        </div>
+        <p id="set-status" class="live" aria-live="polite"></p>
+        <div id="set-actions" class="row-actions center" hidden>
+          <button type="button" class="btn btn-ghost btn-small side-toggle" data-target="set-compare" aria-pressed="false">並べて比べる</button>
+          <button type="button" id="set-save" class="btn btn-primary btn-small">ビフォーアフター画像を保存</button>
+        </div>
+      </section>
+
+      <!-- 6. 動画 -->
       <section class="step" id="step-videos" aria-labelledby="h-videos">
-        <div class="step-head"><span class="step-no" aria-hidden="true">5</span><h2 id="h-videos">動画でやり方を学ぶ</h2></div>
+        <div class="step-head"><span class="step-no" aria-hidden="true">6</span><h2 id="h-videos">動画でやり方を学ぶ</h2></div>
         <p id="videos-empty" class="lead">分析すると、提案に合ったメイク方法・ヘアセット術の動画をYouTubeとTikTokで並べて表示します。</p>
         <div class="free-search">
           <input type="search" id="video-free-input" maxlength="100" placeholder="自分で探す（例：ボブ 内巻き やり方）" aria-label="動画の検索ワード">
@@ -350,11 +370,12 @@
       <li><strong>写真をセット</strong>「カメラで撮る」か「写真を選ぶ」。正面・明るい場所がおすすめです。</li>
       <li><strong>AIに分析してもらう</strong>顔の形やパーソナルカラーの傾向から、似合う髪型とメイクを提案します。解説は音声でも聞けます。</li>
       <li><strong>髪型とメイクを試す</strong>髪型を選んで「この髪型を試す」。メイクは色を選ぶだけ。スライダーで前後を比べられます。</li>
+      <li><strong>ヘア＋メイクで仕上がりを見る</strong>試した髪型に選んだメイクを重ねた完成イメージを、元の写真と比べたり、ビフォーアフター画像として保存したりできます。</li>
       <li><strong>動画で学ぶ</strong>提案に合ったメイク方法やヘアセット術を、YouTubeとTikTokで並べて見られます。</li>
     </ol>
     <details class="voice-help">
       <summary>話して操作できる言葉</summary>
-      <p>「カメラ」「撮影」「分析して」「解説を読んで」「止めて」「ボブにして」など髪型の名前、「メイク」「動画」「使い方」。それ以外の言葉は要望欄に入ります。</p>
+      <p>「カメラ」「撮影」「分析して」「解説を読んで」「止めて」「ボブにして」など髪型の名前、「メイク」「仕上がり」「動画」「使い方」。それ以外の言葉は要望欄に入ります。</p>
     </details>
     <form method="dialog"><button class="btn btn-primary">はじめる</button></form>
   </dialog>

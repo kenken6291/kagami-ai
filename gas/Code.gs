@@ -1,6 +1,6 @@
 /**
  * かがみAI ～ヘア＆メイク試着室  バックエンド（Google Apps Script）
- * v1.3.0
+ * v1.4.0
  *
  * ■ スクリプトプロパティ（プロジェクトの設定 → スクリプト プロパティ）
  *   必須  GEMINI_API_KEY        … Gemini APIキー
@@ -16,7 +16,7 @@
  * ■ コードを変更したら「デプロイを管理 → 編集 → 新バージョン」で再デプロイが必要です
  */
 
-const APP_VERSION = 'v1.3.0';
+const APP_VERSION = 'v1.4.0';
 const TERMS_VERSION = '2026-10-27';
 const SESSION_TTL = 21600;      // 6時間（CacheServiceの上限）
 const MAX_FAILS = 5;            // ログイン失敗の上限
@@ -382,6 +382,7 @@ const ANALYZE_PROMPT = [
   ' "hairSuggestions": [{"name": "髪型名（10字以内）", "prompt": "画像編集用の具体的な髪型の説明（長さ・前髪・質感）", "reason": "似合う理由（40字以内）"}],',
   ' "hairColorSuggestion": {"name": "髪色名", "prompt": "画像編集用の髪色の説明", "hex": "#RRGGBB"},',
   ' "makeup": {',
+  '   "base": {"name": "ファンデーションの色名（ライト・ピンク系・ナチュラル・オークル・ダークオークル等）", "hex": "#RRGGBB（肌に近い色）"},',
   '   "lip": {"name": "色名", "hex": "#RRGGBB"},',
   '   "eye": {"name": "色名", "hex": "#RRGGBB"},',
   '   "cheek": {"name": "色名", "hex": "#RRGGBB"},',
@@ -707,6 +708,7 @@ const MAKEUP_PROMPT = [
   '',
   '次のJSONだけを返してください（説明文やコードブロックは不要）。',
   '{',
+  ' "base":  {"name": "ファンデーションの色名", "hex": "#RRGGBB（肌に近い色）", "amount": 0〜1（カバー力。シミや小じわを隠したい希望なら0.6〜0.8）},',
   ' "lip":   {"name": "色名", "hex": "#RRGGBB", "amount": 0〜1},',
   ' "eye":   {"name": "色名", "hex": "#RRGGBB", "amount": 0〜1},',
   ' "cheek": {"name": "色名", "hex": "#RRGGBB", "amount": 0〜1},',
@@ -714,7 +716,7 @@ const MAKEUP_PROMPT = [
   ' "comment": "どんな狙いで仕上げたか（80字以内、やわらかい話し言葉）"',
   '}',
   '',
-  'effects の意味: nose=鼻を高く見せるシェーディングとハイライト、jaw=あご・フェイスラインをすっきり見せるシェーディング、',
+  'base=ファンデーション（シミ・くすみ・小じわを目立たなくする）。effects の意味: nose=鼻を高く見せるシェーディングとハイライト、jaw=あご・フェイスラインをすっきり見せるシェーディング、',
   'small=小顔に見せる輪郭のシェーディング、bright=顔を明るく見せるトーンアップとハイライト、eyes=目元をぱっちり見せるアイライン。',
   '希望に関係ない効果は0にする。amount は自然に見える範囲（リップ0.3〜0.7、アイ0.2〜0.6、チーク0.2〜0.5目安）。',
   'その部位を塗らない方がよい場合は、その部位を null にする。',

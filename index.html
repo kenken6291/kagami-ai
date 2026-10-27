@@ -288,11 +288,17 @@
             <div class="mk-part">
               <h3>言葉で指示する</h3>
               <div class="input-mic">
-                <input type="text" id="mk-instruct" maxlength="300" placeholder="例：鼻を高く、顔を明るく見せたい" aria-label="メイクの指示">
+                <input type="text" id="mk-instruct" maxlength="300" placeholder="例：シミを隠して、鼻を高く見せたい" aria-label="メイクの指示">
                 <button type="button" id="mk-instruct-mic" class="mic" aria-pressed="false" aria-label="音声で入力"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 17v5M8 22h8"/></svg></button>
               </div>
               <p id="mk-instruct-live" class="live" aria-live="polite"></p>
               <button type="button" id="mk-instruct-btn" class="btn btn-ghost btn-small">AIにおまかせ</button>
+            </div>
+            <div class="mk-part">
+              <h3>ファンデーション（シミ・くすみを隠す）</h3>
+              <div id="mk-base" class="swatches"></div>
+              <label class="amt">カバー力 <input type="range" id="mk-base-amt" min="0" max="100" value="50"></label>
+              <p class="hint-soft">肌の色に近いものを選ぶと自然です。カバー力を上げると、シミや小じわがより目立たなくなります。</p>
             </div>
             <div class="mk-part">
               <h3>リップ</h3>
@@ -435,7 +441,7 @@
   </div>
 
   <footer class="site-footer">
-    <p><span class="js-app-name">かがみAI</span> <span class="js-version">v1.3.0</span></p>
+    <p><span class="js-app-name">かがみAI</span> <span class="js-version">v1.4.0</span></p>
     <p class="muted">AIの提案は参考情報です。<small class="js-earth-credit"></small></p>
   </footer>
 
@@ -445,7 +451,7 @@
     <ol class="guide-steps">
       <li><strong>写真をセット</strong>「カメラで撮る」か「写真を選ぶ」。正面・明るい場所がおすすめです。</li>
       <li><strong>AIに分析してもらう</strong>顔の形やパーソナルカラーの傾向から、似合う髪型とメイクを提案します。解説は音声でも聞けます。</li>
-      <li><strong>髪型とメイクを試す</strong>髪型を選んで「この髪型を試す」。メイクは雰囲気や「鼻を高く見せる」などの印象を選ぶか、言葉で指示できます。スライダーで前後を比べられます。</li>
+      <li><strong>髪型とメイクを試す</strong>髪型を選んで「この髪型を試す」。メイクは雰囲気や、ファンデーションでシミを隠す、「鼻を高く見せる」などの印象を選ぶか、言葉で指示できます。スライダーで前後を比べられます。</li>
       <li><strong>ヘア＋メイクで仕上がりを見る</strong>試した髪型に選んだメイクを重ねた完成イメージを、元の写真と比べたり、ビフォーアフター画像として保存したりできます。</li>
       <li><strong>ギャラリーで見比べる</strong>「ギャラリーに保存」した組み合わせを一覧から選んで、並べたりスライダーで見比べたりできます。</li>
       <li><strong>動画で学ぶ</strong>AIが、あなたの髪型・メイクに合ったやり方動画（通常・ショート）を一覧にします。見たい動画を選ぶと再生できます。</li>

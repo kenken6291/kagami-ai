@@ -1,9 +1,10 @@
-/* かがみAI app.js v1.3.0 */
+/* かがみAI app.js v1.4.0 */
 const C = window.CONFIG;
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
 const TOKEN_KEY = 'kagami_token';
 const GUIDE_KEY = 'kagami_guide_seen';
+const MAKEUP_PARTS = ['base', 'lip', 'eye', 'cheek'];
 
 const state = {
   token: localStorage.getItem(TOKEN_KEY) || '',
@@ -15,6 +16,7 @@ const state = {
   historyId: null,
   hair: { style: '', label: '', color: '', appliedLabel: '' },
   makeup: {
+    base: { color: null, name: '', amount: 0.5 },   // ファンデーション（amount＝カバー力）
     lip: { color: null, name: '', amount: 0.55 },
     eye: { color: null, name: '', amount: 0.45 },
     cheek: { color: null, name: '', amount: 0.40 },
@@ -717,7 +719,7 @@ function renderMakeup() {
 function drawMakeup(cv, img, lm) {
   cv.width = img.naturalWidth;
   cv.height = img.naturalHeight;
-  const ctx = cv.getContext('2d');
+  const ctx = cv.getContext('2d', { willReadFrequently: true });
   ctx.drawImage(img, 0, 0);
   if (!lm) return;
 
@@ -726,6 +728,11 @@ function drawMakeup(cv, img, lm) {
   const faceW = Math.hypot(P(454).x - P(234).x, P(454).y - P(234).y);
   const m = state.makeup;
   const fx = { ctx, P, faceW, k: m.strength, on: key => m.effects.has(key) && m.strength > 0 };
+
+  // ファンデーション（シミ・くすみ・小じわを目立たなくする）
+  if (m.base.color && m.base.amount > 0) {
+    try { drawFoundation(ctx, img, lm, P, faceW, m.base); } catch (e) { console.warn('ファンデーションの描画に失敗', e); }
+  }
 
   drawShading(fx);
 
@@ -760,6 +767,127 @@ function drawMakeup(cv, img, lm) {
   }
 
   drawHighlights(fx);
+}
+
+/* ---------- ファンデーション ---------- */
+const R_EYE = [33, 7, 163, 144, 145, 153, 154, 155, 133, 173, 157, 158, 159, 160, 161, 246];
+const L_EYE = [362, 382, 381, 380, 374, 373, 390, 249, 263, 466, 388, 387, 386, 385, 384, 398];
+const R_BROW_FULL = [70, 63, 105, 66, 107, 55, 65, 52, 53, 46];
+const L_BROW_FULL = [300, 293, 334, 296, 336, 285, 295, 282, 283, 276];
+const fdnCache = new WeakMap();
+let filterOk = null;
+
+/** ctx.filter（ぼかし）が使えるか一度だけ確認（古いSafari対策） */
+function canvasFilterSupported() {
+  if (filterOk != null) return filterOk;
+  try {
+    const c = document.createElement('canvas');
+    c.width = 5; c.height = 1;
+    const x = c.getContext('2d', { willReadFrequently: true });
+    x.filter = 'blur(1px)';
+    x.fillStyle = '#000';
+    x.fillRect(2, 0, 1, 1);
+    filterOk = x.getImageData(0, 0, 1, 1).data[3] > 0 || x.getImageData(1, 0, 1, 1).data[3] > 0;
+  } catch (e) { filterOk = false; }
+  return filterOk;
+}
+
+/** ぼかしたコピーを作る（filter が無い環境は縮小→拡大でぼかす） */
+function softCopy(src, r, W, H) {
+  const c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  const x = c.getContext('2d', { willReadFrequently: true });
+  if (canvasFilterSupported()) {
+    x.filter = `blur(${r.toFixed(1)}px)`;
+    x.drawImage(src, 0, 0, W, H);
+  } else {
+    const f = Math.max(2, Math.round(r / 1.5));
+    const s = document.createElement('canvas');
+    s.width = Math.max(1, Math.round(W / f));
+    s.height = Math.max(1, Math.round(H / f));
+    const sx = s.getContext('2d');
+    sx.imageSmoothingQuality = 'high';
+    sx.drawImage(src, 0, 0, s.width, s.height);
+    x.imageSmoothingQuality = 'high';
+    x.drawImage(s, 0, 0, W, H);
+  }
+  return c;
+}
+
+/** 肌の範囲（目・眉・唇・小鼻を除く）とぼかした肌を、写真ごとに一度だけ作る */
+function foundationBase(img, lm, W, H, P, faceW) {
+  const hit = fdnCache.get(img);
+  if (hit && hit.lm === lm && hit.W === W) return hit;
+
+  const mk = document.createElement('canvas');
+  mk.width = W; mk.height = H;
+  const m = mk.getContext('2d');
+  const center = P(1);
+  m.fillStyle = '#fff';
+  m.beginPath();
+  poly(m, FACE_OVAL.map(P).map(p => lerpPt(p, center, 0.05)));
+  m.fill();
+  m.globalCompositeOperation = 'destination-out';
+  const cut = (idx, scale) => {
+    const pts = idx.map(P);
+    const cx = pts.reduce((a, p) => a + p.x, 0) / pts.length;
+    const cy = pts.reduce((a, p) => a + p.y, 0) / pts.length;
+    m.beginPath();
+    poly(m, pts.map(p => ({ x: cx + (p.x - cx) * scale, y: cy + (p.y - cy) * scale })));
+    m.fill();
+  };
+  cut(R_EYE, 1.55);
+  cut(L_EYE, 1.55);
+  cut(R_BROW_FULL, 1.3);
+  cut(L_BROW_FULL, 1.3);
+  cut(LIP_OUTER, 1.12);
+  m.beginPath();
+  [98, 327].forEach(i => { const p = P(i); m.moveTo(p.x + faceW * 0.03, p.y); m.arc(p.x, p.y, faceW * 0.03, 0, Math.PI * 2); });
+  m.fill();
+
+  const maskData = softCopy(mk, faceW * 0.025, W, H).getContext('2d', { willReadFrequently: true }).getImageData(0, 0, W, H).data;
+  const blurData = softCopy(img, faceW * 0.03, W, H).getContext('2d', { willReadFrequently: true }).getImageData(0, 0, W, H).data;
+  const result = { lm, W, maskData, blurData };
+  fdnCache.set(img, result);
+  return result;
+}
+
+/**
+ * ファンデーション：
+ *  ・まわりより暗い点（シミ・くすみ・小じわ）を周囲の肌色に近づけて隠す
+ *  ・肌全体を軽くなめらかにし、ファンデーションの色をうっすら重ねる
+ */
+function drawFoundation(ctx, img, lm, P, faceW, part) {
+  const W = ctx.canvas.width, H = ctx.canvas.height;
+  const base = foundationBase(img, lm, W, H, P, faceW);
+  const id = ctx.getImageData(0, 0, W, H);
+  const d = id.data, B = base.blurData, M = base.maskData;
+  const n = parseInt(part.color.slice(1), 16);
+  const fr = (n >> 16) & 255, fg = (n >> 8) & 255, fb = n & 255;
+  const amt = part.amount;
+  const smooth = 0.35 * amt;       // なめらかさ
+  const conceal = Math.min(1, 1.1 * amt); // シミ隠し
+  const tint = 0.14 * amt;         // 色のせ
+
+  for (let i = 0; i < d.length; i += 4) {
+    const ma = M[i + 3];
+    if (!ma) continue;
+    const mw = ma / 255;
+    const r = d[i], g = d[i + 1], b = d[i + 2];
+    const br = B[i], bg = B[i + 1], bb = B[i + 2];
+    const dark = (0.299 * br + 0.587 * bg + 0.114 * bb) - (0.299 * r + 0.587 * g + 0.114 * b);
+    let t = smooth;
+    if (dark > 3) t = Math.max(t, Math.min(1, (dark - 3) / 25) * conceal);
+    t *= mw;
+    let nr = r + (br - r) * t;
+    let ng = g + (bg - g) * t;
+    let nb = b + (bb - b) * t;
+    const k = tint * mw;
+    d[i] = nr + (fr - nr) * k;
+    d[i + 1] = ng + (fg - ng) * k;
+    d[i + 2] = nb + (fb - nb) * k;
+  }
+  ctx.putImageData(id, 0, 0);
 }
 
 /* ---------- 見せたい印象（シェーディング・ハイライト・アイライン） ---------- */
@@ -860,7 +988,7 @@ function drawHighlights({ ctx, P, faceW, k, on }) {
 }
 
 /* ---------- 5. ヘア＋メイク セット ---------- */
-const MAKEUP_LABELS = [['lip', 'リップ'], ['eye', 'アイシャドウ'], ['cheek', 'チーク']];
+const MAKEUP_LABELS = [['base', 'ファンデーション'], ['lip', 'リップ'], ['eye', 'アイシャドウ'], ['cheek', 'チーク']];
 
 function makeupSummaryText() {
   const m = state.makeup;
@@ -998,7 +1126,7 @@ function setMakeupColor(part, hex, name = '') {
 }
 
 function renderMakeupControls() {
-  ['lip', 'eye', 'cheek'].forEach(part => {
+  MAKEUP_PARTS.forEach(part => {
     $('#mk-' + part).replaceChildren(
       swatch(part, null, 'なし'),
       ...C.MAKEUP_PALETTE[part].map(c => swatch(part, c.hex, c.name)));
@@ -1013,7 +1141,7 @@ function renderAiMakeup(mk) {
   $$('.swatch.ai').forEach(x => x.remove());
   if (!mk) return;
   let any = false;
-  ['lip', 'eye', 'cheek'].forEach(part => {
+  MAKEUP_PARTS.forEach(part => {
     const s = mk[part];
     if (s && isHex(s.hex)) {
       $('#mk-' + part).firstChild.after(swatch(part, s.hex, s.name || 'おすすめ', true));
@@ -1029,7 +1157,7 @@ function applyAiMakeup() {
   const mk = state.analysis?.makeup;
   if (!mk) return;
   clearPreset();
-  ['lip', 'eye', 'cheek'].forEach(part => { if (isHex(mk[part]?.hex)) setMakeupColor(part, mk[part].hex, mk[part].name || 'おすすめ'); });
+  MAKEUP_PARTS.forEach(part => { if (isHex(mk[part]?.hex)) setMakeupColor(part, mk[part].hex, mk[part].name || 'おすすめ'); });
   $('#makeup-compare').scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
@@ -1057,7 +1185,7 @@ function setEffects(keys, strength) {
 }
 
 function applyPreset(p, btn) {
-  ['lip', 'eye', 'cheek'].forEach(part => {
+  MAKEUP_PARTS.forEach(part => {
     const c = p[part];
     if (c && isHex(c.hex)) { setAmount(part, c.amount); setMakeupColor(part, c.hex, c.name); }
   });
@@ -1104,7 +1232,7 @@ function localPlan(text) {
     (p.key === 'formal' && /きちんと|仕事|オフィス|面接|上品/.test(t)) ||
     (p.key === 'young' && /若々し|若く|血色|元気/.test(t)));
   if (preset) {
-    ['lip', 'eye', 'cheek'].forEach(part => { plan[part] = preset[part]; });
+    MAKEUP_PARTS.forEach(part => { plan[part] = preset[part]; });
     preset.effects.forEach(k => { plan.effects[k] = preset.strength; });
   }
   const rules = [
@@ -1112,12 +1240,16 @@ function localPlan(text) {
     ['bright', /明る|透明感|ツヤ|くすみ|トーンアップ/], ['eyes', /目|まぶた|アイライン|ぱっちり/],
   ];
   rules.forEach(([k, re]) => { if (re.test(t)) plan.effects[k] = 0.6; });
-  return (preset || Object.keys(plan.effects).length) ? plan : null;
+  if (/シミ|しみ|ファンデ|くすみ|そばかす|クマ|肌|毛穴|小じわ/.test(t)) {
+    const f = C.MAKEUP_PALETTE.base.find(c => c.name === 'ナチュラル') || C.MAKEUP_PALETTE.base[0];
+    plan.base = { hex: f.hex, name: f.name, amount: /しっかり|隠/.test(t) ? 0.75 : 0.55 };
+  }
+  return (preset || plan.base || Object.keys(plan.effects).length) ? plan : null;
 }
 
 function applyPlan(plan) {
   clearPreset();
-  ['lip', 'eye', 'cheek'].forEach(part => {
+  MAKEUP_PARTS.forEach(part => {
     const c = plan[part];
     if (c === null) setMakeupColor(part, null);
     else if (c && isHex(c.hex)) {
@@ -1291,7 +1423,7 @@ async function saveToGallery(source) {
     effects: [...m.effects],
     strength: m.strength,
     instruction: m.instruction,
-    lip: m.lip, eye: m.eye, cheek: m.cheek,
+    base: m.base, lip: m.lip, eye: m.eye, cheek: m.cheek,
   };
   const r = await run(() => api('saveLook', {
     image: b64(scaledJpeg(cv, 1024, 0.9)),
@@ -1753,7 +1885,7 @@ function handleCommand(text) {
   if (hit) { hit.click(); go('step-hair'); return tryHair(); }
   if (/ギャラリー|見比べ|比較/.test(t)) return go('step-gallery');
   if (/セット|仕上が|完成/.test(t)) return go('step-set');
-  if (/鼻|あご|顎|小顔|明る|ナチュラル|華やか|ぱっちり/.test(t)) {
+  if (/鼻|あご|顎|小顔|明る|ナチュラル|華やか|ぱっちり|シミ|ファンデ|くすみ/.test(t)) {
     $('#mk-instruct').value = text;
     go('step-makeup');
     return makeupByInstruction();
@@ -1795,7 +1927,7 @@ function bindMain() {
     clearPreset();
     state.makeup.instruction = '';
     setEffects([], null);
-    ['lip', 'eye', 'cheek'].forEach(p => setMakeupColor(p, null));
+    MAKEUP_PARTS.forEach(p => setMakeupColor(p, null));
   });
   setupMakeupStyle();
   $('#mk-gallery-save').addEventListener('click', () => saveToGallery('makeup'));

@@ -5,7 +5,7 @@
 window.CONFIG = {
   APP_NAME: 'かがみAI',
   APP_SUBTITLE: 'ヘア＆メイク試着室',
-  VERSION: 'v1.3.0',
+  VERSION: 'v1.4.0',
 
   // GASウェブアプリのURL（デプロイ後に表示される …/exec のURL）
   GAS_ENDPOINT: 'https://script.google.com/macros/s/AKfycbybkQgdG4a9qMdUOg3421jSmaAvYSN5zJ6dzBVybL86WwK6aiCNweBRnB7AH-HaO8Xa/exec',
@@ -70,6 +70,7 @@ window.CONFIG = {
   MAKEUP_PRESETS: [
     {
       key: 'natural', label: 'ナチュラル',
+      base: { hex: '#E6BF9F', name: 'ナチュラル', amount: 0.45 },
       lip: { hex: '#C98479', name: 'ヌーディローズ', amount: 0.4 },
       eye: { hex: '#B8946E', name: 'ベージュ', amount: 0.3 },
       cheek: { hex: '#F2A07B', name: 'ピーチ', amount: 0.25 },
@@ -77,6 +78,7 @@ window.CONFIG = {
     },
     {
       key: 'glam', label: '華やか',
+      base: { hex: '#F1D2B8', name: 'ライト', amount: 0.6 },
       lip: { hex: '#C24D6B', name: 'ローズ', amount: 0.7 },
       eye: { hex: '#C77D8A', name: 'ピンク', amount: 0.55 },
       cheek: { hex: '#EE8FA6', name: 'ピンク', amount: 0.4 },
@@ -84,6 +86,7 @@ window.CONFIG = {
     },
     {
       key: 'formal', label: 'きちんと',
+      base: { hex: '#DDB08C', name: 'オークル', amount: 0.55 },
       lip: { hex: '#B7776A', name: 'ベージュ', amount: 0.5 },
       eye: { hex: '#7A5236', name: 'ブラウン', amount: 0.4 },
       cheek: { hex: '#CC6B7F', name: 'ローズ', amount: 0.25 },
@@ -91,6 +94,7 @@ window.CONFIG = {
     },
     {
       key: 'young', label: '若々しく',
+      base: { hex: '#EBC4AE', name: 'ピンク系', amount: 0.5 },
       lip: { hex: '#E2725B', name: 'コーラル', amount: 0.55 },
       eye: { hex: '#B8946E', name: 'ベージュ', amount: 0.3 },
       cheek: { hex: '#F07C6C', name: 'コーラル', amount: 0.45 },
@@ -99,6 +103,14 @@ window.CONFIG = {
   ],
 
   MAKEUP_PALETTE: {
+    // ファンデーション（肌の色に近いものを選ぶ）
+    base: [
+      { name: 'ライト', hex: '#F1D2B8' },
+      { name: 'ピンク系', hex: '#EBC4AE' },
+      { name: 'ナチュラル', hex: '#E6BF9F' },
+      { name: 'オークル', hex: '#DDB08C' },
+      { name: 'ダークオークル', hex: '#C9966F' },
+    ],
     lip: [
       { name: 'コーラル', hex: '#E2725B' },
       { name: 'ローズ', hex: '#C24D6B' },

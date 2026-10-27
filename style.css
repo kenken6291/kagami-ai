@@ -286,6 +286,37 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--rouge); width:
 .set-summary { font-weight: 700; margin: 0 0 4px; }
 .set-summary:empty { display: none; }
 
+.input-mic input { flex: 1; min-width: 0; }
+
+/* ---------- ギャラリー ---------- */
+.gal-total { align-self: center; }
+.gal-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 10px; margin: 8px 0 16px; }
+.gal-item {
+  position: relative; padding: 0; border: 2px solid var(--line); border-radius: 12px;
+  background: var(--surface); cursor: pointer; overflow: hidden; text-align: left;
+}
+.gal-item img { width: 100%; aspect-ratio: 3 / 4; object-fit: cover; }
+.gal-item[aria-pressed="true"] { border-color: var(--rouge); box-shadow: 0 0 0 2px var(--rouge); }
+.gal-cap { display: block; padding: 4px 6px 6px; font-size: .78rem; line-height: 1.4; }
+.gal-cap small { display: block; color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gal-badge {
+  position: absolute; top: 6px; left: 6px; z-index: 1; min-width: 28px; height: 28px; padding: 0 6px;
+  border-radius: 999px; background: var(--rouge); color: var(--rouge-ink); font-weight: 700;
+  display: grid; place-items: center; font-size: .9rem;
+}
+.gal-compare-area { border-top: 1px dashed var(--line); padding-top: 8px; }
+.gal-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 18px 14px; margin-top: 8px; }
+@media (min-width: 720px) { .gal-grid { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); } }
+.gal-fig { position: relative; margin: 0; }
+.gal-fig .gal-badge { top: 10px; left: 10px; }
+.gal-fig img {
+  width: 100%; border-radius: 50% 50% 12px 12px / 22% 22% 12px 12px;
+  box-shadow: 0 0 0 4px var(--silver), 0 0 0 5px var(--silver-deep);
+}
+.gal-fig figcaption { margin-top: 12px; font-size: .88rem; line-height: 1.55; }
+.gal-fig figcaption strong { display: block; }
+.gal-fig figcaption span { color: var(--ink-soft); }
+
 /* ---------- 動画 ---------- */
 .free-search { display: flex; gap: 8px; margin: 10px 0 20px; }
 .video-list { display: grid; gap: 30px; }

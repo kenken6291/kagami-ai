@@ -1,4 +1,4 @@
-/* かがみAI app.js v1.0.0 */
+/* かがみAI app.js v1.1.0 */
 const C = window.CONFIG;
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
@@ -18,6 +18,10 @@ const state = {
     lip: { color: null, name: '', amount: 0.55 },
     eye: { color: null, name: '', amount: 0.45 },
     cheek: { color: null, name: '', amount: 0.40 },
+    effects: new Set(),   // 'nose' | 'jaw' | 'small' | 'bright' | 'eyes'
+    strength: 0.6,        // 印象効果の強さ
+    preset: '',           // 雰囲気の名前
+    instruction: '',      // 言葉での指示
   },
   baseImgs: {},                              // { original: Image, hair: Image }
   landmarks: { original: null, hair: null }, // null=未検出 / false=顔なし / 配列
@@ -240,6 +244,7 @@ function enterMain() {
   state.forceChange = false;
   $('#user-name').textContent = state.user?.nickname || '';
   showView('main');
+  loadGallery(true);
   if (!localStorage.getItem(GUIDE_KEY)) openGuide();
 }
 
@@ -378,15 +383,16 @@ function bindMenu() {
   });
   $('#menu-delete-images').addEventListener('click', async () => {
     close();
-    if (!confirm('サーバーに一時保存されているあなたの写真をすべて削除します。よろしいですか？')) return;
+    if (!confirm('サーバーに保存されているあなたの写真（一時保存とギャラリー）をすべて削除します。よろしいですか？')) return;
     const r = await run(() => api('deleteMyImages'), '削除しています…');
-    if (r) toast(r.message, 'success');
+    if (r) { toast(r.message, 'success'); resetGallery(); }
   });
   $('#menu-logout').addEventListener('click', async () => {
     close();
     stopNarration();
     try { await api('logout'); } catch (e) { /* noop */ }
     clearSession();
+    resetGallery();
     showView('login');
     toast('ログアウトしました。');
   });
@@ -629,6 +635,15 @@ const R_BROW = [70, 63, 105, 66, 107];
 const L_LID = [263, 466, 388, 387, 386, 385, 384, 398, 362];
 const L_BROW = [300, 293, 334, 296, 336];
 const CHEEKS = [50, 280];
+const FACE_OVAL = [10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397, 365, 379, 378, 400, 377, 152, 148, 176, 149, 150, 136, 172, 58, 132, 93, 234, 127, 162, 21, 54, 103, 67, 109];
+const NOSE_LINE = [168, 6, 197, 195, 5];
+const JAW_R = [323, 361, 288, 397, 365, 379, 378];
+const JAW_L = [93, 132, 58, 172, 136, 150, 149];
+const SIDE_R = [297, 332, 284, 251, 389, 356, 454, 323, 361];
+const SIDE_L = [67, 103, 54, 21, 162, 127, 234, 93, 132];
+const SHADE = '#6B4A3C';   // シェーディング色
+const LIGHT = '#FFF4EC';   // ハイライト色
+const LINER = '#2B1F22';   // アイライン色
 
 let landmarkerPromise = null;
 function getLandmarker() {
@@ -710,6 +725,9 @@ function drawMakeup(cv, img, lm) {
   const P = i => ({ x: lm[i].x * W, y: lm[i].y * H });
   const faceW = Math.hypot(P(454).x - P(234).x, P(454).y - P(234).y);
   const m = state.makeup;
+  const fx = { ctx, P, faceW, k: m.strength, on: key => m.effects.has(key) && m.strength > 0 };
+
+  drawShading(fx);
 
   // チーク
   if (m.cheek.color && m.cheek.amount > 0) {
@@ -729,6 +747,8 @@ function drawMakeup(cv, img, lm) {
       paint(ctx, { fill: m.eye.color, alpha: m.eye.amount * 0.55, mode: 'multiply', blur: faceW * 0.018, path: p => poly(p, pts) });
     });
   }
+  // 目元ぱっちり（アイライン）
+  if (fx.on('eyes')) drawLiner(fx);
   // リップ（内側の口の中は塗らない）
   if (m.lip.color && m.lip.amount > 0) {
     const outer = LIP_OUTER.map(P);
@@ -738,15 +758,123 @@ function drawMakeup(cv, img, lm) {
     paint(ctx, { fill: m.lip.color, alpha: m.lip.amount * 0.55, mode: 'multiply', blur, path });
     paint(ctx, { fill: m.lip.color, alpha: m.lip.amount * 0.35, mode: 'soft-light', blur, path });
   }
+
+  drawHighlights(fx);
+}
+
+/* ---------- 見せたい印象（シェーディング・ハイライト・アイライン） ---------- */
+const lerpPt = (a, b, t) => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+
+/** 輪郭の点と、そこから顔の中心へ寄せた点で帯状の形を作る */
+function bandToward(P, idx, t) {
+  const center = P(1);
+  const outer = idx.map(P);
+  const inner = outer.map(p => lerpPt(p, center, t));
+  return [...outer, ...inner.reverse()];
+}
+
+/** 鼻筋に沿った帯（side: -1/1 で左右、0 で中央） */
+function noseStrip(P, faceW, offsetRate, widthRate, side, idx = NOSE_LINE) {
+  const line = idx.map(P);
+  const a = line[0], b = line[line.length - 1];
+  const len = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+  const perp = { x: -(b.y - a.y) / len, y: (b.x - a.x) / len };
+  const off = faceW * offsetRate * side;
+  const w = faceW * widthRate / 2;
+  const outer = line.map(p => ({ x: p.x + perp.x * (off + w), y: p.y + perp.y * (off + w) }));
+  const inner = line.map(p => ({ x: p.x + perp.x * (off - w), y: p.y + perp.y * (off - w) }));
+  return [...outer, ...inner.reverse()];
+}
+
+function glow(ctx, c, r, alpha) {
+  const g = ctx.createRadialGradient(c.x, c.y, 0, c.x, c.y, r);
+  g.addColorStop(0, hexToRgba(LIGHT, 1));
+  g.addColorStop(1, hexToRgba(LIGHT, 0));
+  paint(ctx, { fill: g, alpha, mode: 'screen', blur: 0, path: p => p.arc(c.x, c.y, r, 0, Math.PI * 2) });
+}
+
+function drawShading({ ctx, P, faceW, k, on }) {
+  // 明るく見せる：顔全体をトーンアップ
+  if (on('bright')) {
+    paint(ctx, { fill: LIGHT, alpha: k * 0.18, mode: 'screen', blur: faceW * 0.06, path: p => poly(p, FACE_OVAL.map(P)) });
+  }
+  // 小顔に見せる：こめかみ〜頬の外側
+  if (on('small')) {
+    [SIDE_R, SIDE_L].forEach(idx => paint(ctx, {
+      fill: SHADE, alpha: k * 0.38, mode: 'multiply', blur: faceW * 0.05, path: p => poly(p, bandToward(P, idx, 0.12)),
+    }));
+  }
+  // あごをすっきり：フェイスラインの下側
+  if (on('jaw')) {
+    [JAW_R, JAW_L].forEach(idx => paint(ctx, {
+      fill: SHADE, alpha: k * 0.42, mode: 'multiply', blur: faceW * 0.04, path: p => poly(p, bandToward(P, idx, 0.16)),
+    }));
+  }
+  // 鼻を高く見せる：鼻筋の両脇に影
+  if (on('nose')) {
+    [-1, 1].forEach(side => paint(ctx, {
+      fill: SHADE, alpha: k * 0.42, mode: 'multiply', blur: faceW * 0.02, path: p => poly(p, noseStrip(P, faceW, 0.058, 0.035, side)),
+    }));
+  }
+}
+
+function drawLiner({ ctx, P, faceW, k }) {
+  [R_LID, L_LID].forEach(lid => {
+    const pts = lid.map(P);
+    const outer = pts[0], inner = pts[pts.length - 1];
+    const eyeW = Math.hypot(outer.x - inner.x, outer.y - inner.y);
+    const wing = {
+      x: outer.x + (outer.x - inner.x) * 0.16,
+      y: outer.y + (outer.y - inner.y) * 0.16 - eyeW * 0.07,
+    };
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, k * 0.85);
+    ctx.globalCompositeOperation = 'multiply';
+    if ('filter' in ctx) ctx.filter = `blur(${(faceW * 0.002).toFixed(1)}px)`;
+    ctx.strokeStyle = LINER;
+    ctx.lineWidth = faceW * 0.008 * (0.6 + k);
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    ctx.moveTo(wing.x, wing.y);
+    pts.forEach(p => ctx.lineTo(p.x, p.y));
+    ctx.stroke();
+    ctx.restore();
+  });
+}
+
+function drawHighlights({ ctx, P, faceW, k, on }) {
+  if (on('nose')) {
+    paint(ctx, {
+      fill: LIGHT, alpha: k * 0.45, mode: 'screen', blur: faceW * 0.012,
+      path: p => poly(p, noseStrip(P, faceW, 0, 0.028, 0, [6, 197, 195, 5])),
+    });
+  }
+  if (on('jaw')) glow(ctx, lerpPt(P(152), P(17), 0.3), faceW * 0.07, k * 0.35);
+  if (on('bright')) {
+    glow(ctx, P(151), faceW * 0.12, k * 0.35);                         // おでこ
+    glow(ctx, lerpPt(P(145), P(50), 0.45), faceW * 0.075, k * 0.32);   // 目の下（右）
+    glow(ctx, lerpPt(P(374), P(280), 0.45), faceW * 0.075, k * 0.32);  // 目の下（左）
+    if (!on('jaw')) glow(ctx, lerpPt(P(152), P(17), 0.3), faceW * 0.06, k * 0.25);
+  }
 }
 
 /* ---------- 5. ヘア＋メイク セット ---------- */
 const MAKEUP_LABELS = [['lip', 'リップ'], ['eye', 'アイシャドウ'], ['cheek', 'チーク']];
 
-function setSummaryText() {
+function makeupSummaryText() {
   const m = state.makeup;
-  const parts = MAKEUP_LABELS.filter(([p]) => m[p].color).map(([p, l]) => `${l}：${m[p].name}`);
-  return `髪型：${state.hair.appliedLabel || '—'}／` + (parts.length ? parts.join('／') : 'メイク：なし');
+  const parts = [];
+  if (m.preset) parts.push(`雰囲気：${m.preset}`);
+  MAKEUP_LABELS.filter(([p]) => m[p].color).forEach(([p, l]) => parts.push(`${l}：${m[p].name}`));
+  const eff = C.MAKEUP_EFFECTS.filter(e => m.effects.has(e.key)).map(e => e.label);
+  if (eff.length && m.strength > 0) parts.push(`印象：${eff.join('・')}`);
+  return parts.length ? parts.join('／') : 'メイク：なし';
+}
+const hasMakeup = () => MAKEUP_LABELS.some(([p]) => state.makeup[p].color) || (state.makeup.effects.size > 0 && state.makeup.strength > 0);
+
+function setSummaryText() {
+  return `髪型：${state.hair.appliedLabel || '—'}／` + makeupSummaryText();
 }
 
 async function prepareSet() {
@@ -780,7 +908,7 @@ function renderSet() {
   drawMakeup($('#set-canvas'), img, lm);
   $('#set-summary').textContent = setSummaryText();
   const status = $('#set-status');
-  const noMakeup = MAKEUP_LABELS.every(([p]) => !state.makeup[p].color);
+  const noMakeup = !hasMakeup();
   if (lm === false) status.textContent = '髪型を変えた写真から顔を見つけられなかったため、メイクはのせていません。';
   else if (lm == null) status.textContent = '顔の位置を読み取っています…';
   else status.textContent = noMakeup ? '4でメイクの色を選ぶと、ここにも重なります。' : '';
@@ -856,7 +984,7 @@ function swatch(part, hex, name, ai = false) {
     'aria-label': (ai ? 'AIのおすすめ ' : '') + name,
     title: (ai ? 'AIのおすすめ：' : '') + name,
   });
-  b.addEventListener('click', () => setMakeupColor(part, hex, name));
+  b.addEventListener('click', () => { clearPreset(); setMakeupColor(part, hex, name); });
   return b;
 }
 
@@ -876,7 +1004,7 @@ function renderMakeupControls() {
       ...C.MAKEUP_PALETTE[part].map(c => swatch(part, c.hex, c.name)));
     const range = $(`#mk-${part}-amt`);
     state.makeup[part].amount = range.value / 100;
-    range.addEventListener('input', () => { state.makeup[part].amount = range.value / 100; renderMakeup(); });
+    range.addEventListener('input', () => { clearPreset(); state.makeup[part].amount = range.value / 100; renderMakeup(); });
     setMakeupColor(part, null);
   });
 }
@@ -900,8 +1028,303 @@ function renderAiMakeup(mk) {
 function applyAiMakeup() {
   const mk = state.analysis?.makeup;
   if (!mk) return;
+  clearPreset();
   ['lip', 'eye', 'cheek'].forEach(part => { if (isHex(mk[part]?.hex)) setMakeupColor(part, mk[part].hex, mk[part].name || 'おすすめ'); });
   $('#makeup-compare').scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+/* ---------- 雰囲気・見せたい印象・言葉での指示 ---------- */
+const EFFECT_KEYS = () => C.MAKEUP_EFFECTS.map(e => e.key);
+const clamp01 = v => Math.max(0, Math.min(1, Number(v) || 0));
+
+function clearPreset() {
+  state.makeup.preset = '';
+  $$('#mk-presets .chip').forEach(b => b.setAttribute('aria-pressed', 'false'));
+}
+
+function setAmount(part, a) {
+  state.makeup[part].amount = clamp01(a);
+  $(`#mk-${part}-amt`).value = Math.round(state.makeup[part].amount * 100);
+}
+
+function setEffects(keys, strength) {
+  state.makeup.effects = new Set(keys.filter(k => EFFECT_KEYS().includes(k)));
+  $$('#mk-effects .chip').forEach(b => b.setAttribute('aria-pressed', String(state.makeup.effects.has(b.dataset.key))));
+  if (strength != null) {
+    state.makeup.strength = clamp01(strength);
+    $('#mk-effect-amt').value = Math.round(state.makeup.strength * 100);
+  }
+}
+
+function applyPreset(p, btn) {
+  ['lip', 'eye', 'cheek'].forEach(part => {
+    const c = p[part];
+    if (c && isHex(c.hex)) { setAmount(part, c.amount); setMakeupColor(part, c.hex, c.name); }
+  });
+  setEffects(p.effects || [], p.strength);
+  state.makeup.preset = p.label;
+  $$('#mk-presets .chip').forEach(b => b.setAttribute('aria-pressed', String(b === btn)));
+  renderMakeup();
+}
+
+function setupMakeupStyle() {
+  $('#mk-presets').replaceChildren(...C.MAKEUP_PRESETS.map(p => {
+    const b = el('button', { type: 'button', class: 'chip', 'aria-pressed': 'false', 'data-key': p.key }, p.label);
+    b.addEventListener('click', () => applyPreset(p, b));
+    return b;
+  }));
+  $('#mk-effects').replaceChildren(...C.MAKEUP_EFFECTS.map(e => {
+    const b = el('button', { type: 'button', class: 'chip', 'aria-pressed': 'false', 'data-key': e.key }, e.label);
+    b.addEventListener('click', () => {
+      const on = !state.makeup.effects.has(e.key);
+      if (on) state.makeup.effects.add(e.key); else state.makeup.effects.delete(e.key);
+      b.setAttribute('aria-pressed', String(on));
+      clearPreset();
+      renderMakeup();
+    });
+    return b;
+  }));
+  const amt = $('#mk-effect-amt');
+  state.makeup.strength = amt.value / 100;
+  amt.addEventListener('input', () => { state.makeup.strength = amt.value / 100; clearPreset(); renderMakeup(); });
+
+  $('#mk-instruct-btn').addEventListener('click', makeupByInstruction);
+  $('#mk-instruct').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); makeupByInstruction(); } });
+  $('#mk-instruct-mic').addEventListener('click', () => instructVoice.toggle());
+  $('#mk-instruct-mic').hidden = !instructVoice.supported;
+}
+
+/** AIが使えないときのキーワード判定 */
+function localPlan(text) {
+  const t = text.replace(/\s/g, '');
+  const plan = { effects: {} };
+  const preset = C.MAKEUP_PRESETS.find(p =>
+    (p.key === 'natural' && /ナチュラル|自然|すっぴん風|薄め/.test(t)) ||
+    (p.key === 'glam' && /華やか|パーティ|結婚式|派手/.test(t)) ||
+    (p.key === 'formal' && /きちんと|仕事|オフィス|面接|上品/.test(t)) ||
+    (p.key === 'young' && /若々し|若く|血色|元気/.test(t)));
+  if (preset) {
+    ['lip', 'eye', 'cheek'].forEach(part => { plan[part] = preset[part]; });
+    preset.effects.forEach(k => { plan.effects[k] = preset.strength; });
+  }
+  const rules = [
+    ['nose', /鼻/], ['jaw', /あご|顎|フェイスライン|二重あご/], ['small', /小顔|顔を小さ|輪郭/],
+    ['bright', /明る|透明感|ツヤ|くすみ|トーンアップ/], ['eyes', /目|まぶた|アイライン|ぱっちり/],
+  ];
+  rules.forEach(([k, re]) => { if (re.test(t)) plan.effects[k] = 0.6; });
+  return (preset || Object.keys(plan.effects).length) ? plan : null;
+}
+
+function applyPlan(plan) {
+  clearPreset();
+  ['lip', 'eye', 'cheek'].forEach(part => {
+    const c = plan[part];
+    if (c === null) setMakeupColor(part, null);
+    else if (c && isHex(c.hex)) {
+      if (c.amount != null) setAmount(part, c.amount);
+      setMakeupColor(part, c.hex, c.name || 'AIの提案');
+    }
+  });
+  const eff = plan.effects || {};
+  const keys = Object.keys(eff).filter(k => Number(eff[k]) > 0.15);
+  const vals = keys.map(k => clamp01(eff[k]));
+  setEffects(keys, vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null);
+  if (plan.comment) { $('#mk-tips').textContent = plan.comment; $('#mk-tips').hidden = false; }
+  renderMakeup();
+}
+
+async function makeupByInstruction() {
+  const text = $('#mk-instruct').value.trim();
+  if (!text) return toast('どんなメイクにしたいか入力してください（例：鼻を高く見せたい）。', 'error');
+  if (!state.original) return toast('先に写真をセットしてください。', 'error');
+  const context = state.analysis ? { faceShape: state.analysis.faceShape, personalColor: state.analysis.personalColor } : {};
+  let plan = null;
+  loading(true, 'AIがメイクを考えています…');
+  try {
+    plan = (await api('makeupPlan', { text, context })).plan;
+  } catch (e) {
+    console.warn(e);
+  } finally {
+    loading(false);
+  }
+  if (!plan) {
+    plan = localPlan(text);
+    if (!plan) return toast('指示を読み取れませんでした。「鼻を高く」「明るく」などの言葉でお試しください。', 'error');
+    toast('キーワードからメイクを組み立てました。');
+  }
+  state.makeup.instruction = text;
+  applyPlan(plan);
+  $('#makeup-compare').scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+/* =========================================================
+ * 6. ギャラリー
+ * ========================================================= */
+const gallery = { items: [], selected: [], full: {}, loaded: false, slider: false };
+
+function resetGallery() {
+  gallery.items = [];
+  gallery.selected = [];
+  gallery.full = {};
+  gallery.loaded = false;
+  gallery.slider = false;
+  renderGallery();
+}
+
+const fmtDate = iso => {
+  const d = new Date(iso);
+  return isNaN(d) ? '' : d.toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+};
+
+async function loadGallery(force = false) {
+  if (gallery.loaded && !force) return renderGallery();
+  try {
+    const r = await api('listLooks');
+    gallery.items = r.items || [];
+    gallery.loaded = true;
+    gallery.selected = gallery.selected.filter(id => gallery.items.some(i => i.lookId === id));
+    renderGallery();
+  } catch (e) {
+    $('#gal-empty').hidden = false;
+    $('#gal-empty').textContent = 'ギャラリーを読み込めませんでした：' + e.message;
+  }
+}
+
+function renderGallery() {
+  $('#gal-empty').hidden = gallery.items.length > 0;
+  $('#gal-empty').textContent = 'まだ保存した写真はありません。4か5の「ギャラリーに保存」で追加できます。';
+  $('#gal-total').textContent = gallery.items.length ? `${gallery.items.length}枚` : '';
+  $('#gal-list').replaceChildren(...gallery.items.map(it => {
+    const idx = gallery.selected.indexOf(it.lookId);
+    const b = el('button', {
+      type: 'button', class: 'gal-item', 'aria-pressed': String(idx >= 0),
+      'aria-label': `${fmtDate(it.createdAt)} ${it.summary || ''}`,
+    },
+    idx >= 0 ? el('span', { class: 'gal-badge' }, String(idx + 1)) : null,
+    el('img', { src: 'data:image/jpeg;base64,' + it.thumb, alt: '' }),
+    el('span', { class: 'gal-cap' }, fmtDate(it.createdAt), el('small', {}, it.hairLabel || '')));
+    b.addEventListener('click', () => toggleLook(it.lookId));
+    return b;
+  }));
+  renderGalleryCompare();
+}
+
+function toggleLook(id) {
+  const i = gallery.selected.indexOf(id);
+  if (i >= 0) gallery.selected.splice(i, 1);
+  else {
+    if (gallery.selected.length >= 4) return toast('見比べられるのは4枚までです。', 'error');
+    gallery.selected.push(id);
+  }
+  renderGallery();
+}
+
+async function renderGalleryCompare() {
+  const area = $('#gal-compare-area');
+  const sel = [...gallery.selected];
+  area.hidden = sel.length === 0;
+  if (!sel.length) return;
+  $('#gal-count').textContent = sel.length === 1 ? '1枚を選択中（もう1枚以上選ぶと見比べられます）' : `${sel.length}枚を見比べる`;
+
+  const grid = $('#gal-grid');
+  const need = sel.filter(id => !gallery.full[id]);
+  if (need.length) {
+    grid.hidden = false;
+    $('#gal-slider').hidden = true;
+    grid.replaceChildren(el('p', { class: 'muted' }, '写真を読み込んでいます…'));
+    try {
+      const r = await api('getLooks', { ids: need });
+      (r.items || []).forEach(it => { gallery.full[it.lookId] = `data:${it.mimeType};base64,${it.image}`; });
+    } catch (e) {
+      grid.replaceChildren(el('p', { class: 'muted' }, e.message));
+      return;
+    }
+    if (gallery.selected.join() !== sel.join()) return; // 読み込み中に選択が変わった
+  }
+
+  const items = sel.map(id => gallery.items.find(x => x.lookId === id)).filter(Boolean);
+  const src = it => gallery.full[it.lookId] || 'data:image/jpeg;base64,' + it.thumb;
+  grid.replaceChildren(...items.map((it, i) => el('figure', { class: 'gal-fig' },
+    el('span', { class: 'gal-badge' }, String(i + 1)),
+    el('img', { src: src(it), alt: `${i + 1}枚目` }),
+    el('figcaption', {}, el('strong', {}, fmtDate(it.createdAt)), el('span', {}, it.summary || '')))));
+
+  const two = items.length === 2;
+  if (!two) gallery.slider = false;
+  const modeBtn = $('#gal-mode');
+  modeBtn.hidden = !two;
+  modeBtn.setAttribute('aria-pressed', String(gallery.slider));
+  modeBtn.textContent = gallery.slider ? '並べて比べる' : 'スライダーで比べる';
+  $('#gal-slider').hidden = !gallery.slider;
+  if (gallery.slider) await setCompare($('#gal-slider'), src(items[0]), src(items[1]));
+}
+
+function scaledJpeg(cv, max, q) {
+  const s = Math.min(1, max / Math.max(cv.width, cv.height));
+  const c = document.createElement('canvas');
+  c.width = Math.round(cv.width * s);
+  c.height = Math.round(cv.height * s);
+  c.getContext('2d').drawImage(cv, 0, 0, c.width, c.height);
+  return c.toDataURL('image/jpeg', q);
+}
+
+async function saveToGallery(source) {
+  if (!state.original) return toast('先に写真をセットしてください。', 'error');
+  let cv, hair;
+  if (source === 'set') {
+    if (!state.hairResult) return toast('先に3で髪型を試してください。', 'error');
+    renderSet();
+    cv = $('#set-canvas');
+    hair = state.hair.appliedLabel;
+  } else {
+    renderMakeup();
+    cv = $('#makeup-canvas');
+    hair = currentBase() === 'hair' ? state.hair.appliedLabel : '元の髪型';
+  }
+  if (!cv.width) return toast('保存する画像がありません。', 'error');
+  const m = state.makeup;
+  const meta = {
+    source,
+    hair,
+    summary: `髪型：${hair}／` + makeupSummaryText(),
+    preset: m.preset,
+    effects: [...m.effects],
+    strength: m.strength,
+    instruction: m.instruction,
+    lip: m.lip, eye: m.eye, cheek: m.cheek,
+  };
+  const r = await run(() => api('saveLook', {
+    image: b64(scaledJpeg(cv, 1024, 0.9)),
+    thumb: b64(scaledJpeg(cv, 240, 0.72)),
+    meta,
+  }), 'ギャラリーに保存しています…');
+  if (!r) return;
+  gallery.items.unshift(r.look);
+  gallery.loaded = true;
+  renderGallery();
+  toast(r.message + '（6で見比べられます）', 'success');
+}
+
+async function deleteSelectedLooks() {
+  const ids = [...gallery.selected];
+  if (!ids.length) return;
+  if (!confirm(`選んだ${ids.length}枚をギャラリーから削除します。よろしいですか？`)) return;
+  loading(true, '削除しています…');
+  try {
+    for (const id of ids) {
+      await api('deleteLook', { lookId: id });
+      gallery.items = gallery.items.filter(x => x.lookId !== id);
+      delete gallery.full[id];
+    }
+    toast('削除しました。', 'success');
+  } catch (e) {
+    toast(e.message, 'error');
+  } finally {
+    loading(false);
+    gallery.selected = [];
+    gallery.slider = false;
+    renderGallery();
+  }
 }
 
 /* =========================================================
@@ -1195,6 +1618,21 @@ const voiceCmd = new VoiceListener({
   },
 });
 
+// メイク指示の音声入力
+const instructVoice = new VoiceListener({
+  onInterim: t => { $('#mk-instruct-live').textContent = t ? `聞き取り中：${t}` : ''; },
+  onFinal: t => {
+    const input = $('#mk-instruct');
+    input.value = (input.value ? input.value + ' ' : '') + t;
+    $('#mk-instruct-live').textContent = '';
+    makeupByInstruction();
+  },
+  onState: on => {
+    $('#mk-instruct-mic').setAttribute('aria-pressed', String(on));
+    $('#mk-instruct-live').textContent = on ? 'どうぞ、お話しください（例：鼻を高く、明るく見せたい）。' : '';
+  },
+});
+
 function handleCommand(text) {
   const t = text.replace(/[\s、。]/g, '');
   const go = id => document.getElementById(id).scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -1211,7 +1649,13 @@ function handleCommand(text) {
     .sort((a, b) => b.dataset.label.length - a.dataset.label.length);
   const hit = styles.find(b => t.includes(b.dataset.label));
   if (hit) { hit.click(); go('step-hair'); return tryHair(); }
+  if (/ギャラリー|見比べ|比較/.test(t)) return go('step-gallery');
   if (/セット|仕上が|完成/.test(t)) return go('step-set');
+  if (/鼻|あご|顎|小顔|明る|ナチュラル|華やか|ぱっちり/.test(t)) {
+    $('#mk-instruct').value = text;
+    go('step-makeup');
+    return makeupByInstruction();
+  }
   if (/メイク/.test(t)) return go('step-makeup');
   if (/髪型|ヘア/.test(t)) return go('step-hair');
   if (/動画/.test(t)) return go('step-videos');
@@ -1244,7 +1688,14 @@ function bindMain() {
   renderMakeupControls();
   $$('input[name="makeup-base"]').forEach(r => r.addEventListener('change', prepareMakeup));
   $('#mk-apply-ai').addEventListener('click', applyAiMakeup);
-  $('#mk-reset').addEventListener('click', () => ['lip', 'eye', 'cheek'].forEach(p => setMakeupColor(p, null)));
+  $('#mk-reset').addEventListener('click', () => {
+    clearPreset();
+    state.makeup.instruction = '';
+    setEffects([], null);
+    ['lip', 'eye', 'cheek'].forEach(p => setMakeupColor(p, null));
+  });
+  setupMakeupStyle();
+  $('#mk-gallery-save').addEventListener('click', () => saveToGallery('makeup'));
   $('#mk-save').addEventListener('click', () => {
     if (!state.original) return toast('先に写真をセットしてください。', 'error');
     downloadDataUrl($('#makeup-canvas').toDataURL('image/jpeg', 0.92), 'kagami-makeup.jpg');
@@ -1254,6 +1705,12 @@ function bindMain() {
   setupCompare($('#makeup-compare'));
   setupCompare($('#set-compare'));
   $('#set-save').addEventListener('click', saveSetImage);
+  $('#set-gallery-save').addEventListener('click', () => saveToGallery('set'));
+  setupCompare($('#gal-slider'));
+  $('#gal-reload').addEventListener('click', () => loadGallery(true));
+  $('#gal-clear').addEventListener('click', () => { gallery.selected = []; gallery.slider = false; renderGallery(); });
+  $('#gal-delete').addEventListener('click', deleteSelectedLooks);
+  $('#gal-mode').addEventListener('click', () => { gallery.slider = !gallery.slider; renderGalleryCompare(); });
   bindSideToggles();
 
   $('#video-free-btn').addEventListener('click', freeVideoSearch);
@@ -1263,7 +1720,7 @@ function bindMain() {
 
   // ページを離れるときはカメラ・音声を止める
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden) { stopCamera(); requestVoice.cancel(); voiceCmd.cancel(); }
+    if (document.hidden) { stopCamera(); requestVoice.cancel(); voiceCmd.cancel(); instructVoice.cancel(); }
   });
   if ('speechSynthesis' in window) speechSynthesis.getVoices();
 }

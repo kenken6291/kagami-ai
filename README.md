@@ -3,7 +3,7 @@
 顔写真から、似合う髪型とメイクをAIが提案。髪型の変更・バーチャルメイクを試して、参考動画（YouTube／TikTok）で学べるWebアプリです。
 
 - 公開先（予定）: https://kenken6291.github.io/kagami-ai/
-- バージョン: v1.0.0
+- バージョン: v1.1.0
 
 ## ファイル構成
 
@@ -63,6 +63,8 @@ TikTokは公式の検索APIが無いため、「TikTokで探す」リンク＋UR
 
 **History**（診断履歴）: historyId / userId / createdAt / imageFileId / faceShape / personalColor / hairStyle / request / analysisJson
 
+**Looks**（ギャラリー／v1.1.0〜、初回保存時に自動作成）: lookId / userId / createdAt / fileId / thumb（240pxのサムネイルをBase64で保存） / hairLabel / summary / metaJson
+
 **Logs**（操作ログ）: at / userId / action / detail
 
 ## 導入手順
@@ -106,7 +108,12 @@ TikTokは公式の検索APIが無いため、「TikTokで探す」リンク＋UR
 - `STT.SILENCE_MS` … 言葉の間をどれだけ待つか（既定2.5秒）
 - `HAIR_STYLES` / `HAIR_COLORS` / `MAKEUP_PALETTE` … 選択肢の追加・変更
 
+## 更新履歴
+- v1.1.0 メイクの雰囲気（ナチュラル・華やか・きちんと・若々しく）、見せたい印象（鼻を高く・あごすっきり・小顔・明るく・目元ぱっちり）、言葉／音声でのメイク指示（AIにおまかせ）、ギャラリー（保存・一覧・最大4枚の見比べ・削除）を追加
+- v1.0.0 初版
+
 ## 運用メモ
+- ギャラリーの画像は Drive の「会員フォルダ/looks」に保存され、7日の自動削除の対象外です（1人30枚まで、`MAX_LOOKS` で変更）。
 - AIの利用は1人1日40回まで（`DAILY_AI_LIMIT` で変更）。
 - 写真はドライブに7日保存後、自動でゴミ箱へ（`IMAGE_RETENTION_DAYS`）。会員はメニューからいつでも削除可能。
 - 会員を停止するには、Usersシートの `status` を `stopped` などに変更。

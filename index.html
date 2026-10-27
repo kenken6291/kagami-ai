@@ -88,7 +88,7 @@
             <summary>利用規約</summary>
             <div class="terms">
               <p>本サービスは、顔写真をもとに髪型・メイクの提案やシミュレーションを行う無料の個人運営サービスです。</p>
-              <p>アップロードした写真は、分析と画像生成のためにGoogleのAI（Gemini）へ送信されます。写真は運営者のGoogleドライブに一時保存され、7日を過ぎると自動で削除されます。メニューの「保存された写真を削除」からいつでも削除できます。</p>
+              <p>アップロードした写真は、分析と画像生成のためにGoogleのAI（Gemini）へ送信されます。写真は運営者のGoogleドライブに一時保存され、7日を過ぎると自動で削除されます。「ギャラリーに保存」した画像は、ご自身で削除するまで保存されます。メニューの「保存された写真を削除」から、いつでもすべて削除できます。</p>
               <p>ご本人の写真、または写っている方の同意を得た写真のみを使用してください。他人を傷つける目的、法令や公序良俗に反する目的での利用は禁止します。</p>
               <p>運営者は、予告なくサービス内容の変更・停止を行うことがあります。</p>
             </div>
@@ -277,6 +277,24 @@
         <div class="makeup-grid">
           <div class="makeup-controls">
             <div class="mk-part">
+              <h3>メイクの雰囲気</h3>
+              <div id="mk-presets" class="chips"></div>
+            </div>
+            <div class="mk-part">
+              <h3>見せたい印象（いくつでも選べます）</h3>
+              <div id="mk-effects" class="chips"></div>
+              <label class="amt">効果の強さ <input type="range" id="mk-effect-amt" min="0" max="100" value="60"></label>
+            </div>
+            <div class="mk-part">
+              <h3>言葉で指示する</h3>
+              <div class="input-mic">
+                <input type="text" id="mk-instruct" maxlength="300" placeholder="例：鼻を高く、顔を明るく見せたい" aria-label="メイクの指示">
+                <button type="button" id="mk-instruct-mic" class="mic" aria-pressed="false" aria-label="音声で入力"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 17v5M8 22h8"/></svg></button>
+              </div>
+              <p id="mk-instruct-live" class="live" aria-live="polite"></p>
+              <button type="button" id="mk-instruct-btn" class="btn btn-ghost btn-small">AIにおまかせ</button>
+            </div>
+            <div class="mk-part">
               <h3>リップ</h3>
               <div id="mk-lip" class="swatches"></div>
               <label class="amt">濃さ <input type="range" id="mk-lip-amt" min="0" max="100" value="55"></label>
@@ -311,6 +329,7 @@
             <div class="row-actions center">
               <button type="button" class="btn btn-ghost btn-small side-toggle" data-target="makeup-compare" aria-pressed="false">並べて比べる</button>
               <button type="button" id="mk-save" class="btn btn-ghost btn-small">画像を保存</button>
+              <button type="button" id="mk-gallery-save" class="btn btn-ghost btn-small">ギャラリーに保存</button>
             </div>
           </div>
         </div>
@@ -332,13 +351,44 @@
         <p id="set-status" class="live" aria-live="polite"></p>
         <div id="set-actions" class="row-actions center" hidden>
           <button type="button" class="btn btn-ghost btn-small side-toggle" data-target="set-compare" aria-pressed="false">並べて比べる</button>
-          <button type="button" id="set-save" class="btn btn-primary btn-small">ビフォーアフター画像を保存</button>
+          <button type="button" id="set-save" class="btn btn-ghost btn-small">ビフォーアフター画像を保存</button>
+          <button type="button" id="set-gallery-save" class="btn btn-primary btn-small">ギャラリーに保存</button>
         </div>
       </section>
 
-      <!-- 6. 動画 -->
+      <!-- 6. ギャラリー -->
+      <section class="step" id="step-gallery" aria-labelledby="h-gallery">
+        <div class="step-head"><span class="step-no" aria-hidden="true">6</span><h2 id="h-gallery">ギャラリーで見比べる</h2></div>
+        <p class="lead">保存した「ヘア＋メイク」が並びます。タップして選ぶと（4枚まで）、下で見比べられます。</p>
+        <div class="row-actions">
+          <button type="button" id="gal-reload" class="btn btn-ghost btn-small">一覧を更新</button>
+          <span id="gal-total" class="muted gal-total"></span>
+        </div>
+        <p id="gal-empty" class="lead">まだ保存した写真はありません。4か5の「ギャラリーに保存」で追加できます。</p>
+        <div id="gal-list" class="gal-list"></div>
+
+        <div id="gal-compare-area" class="gal-compare-area" hidden>
+          <h3 id="gal-count"></h3>
+          <div class="row-actions">
+            <button type="button" id="gal-mode" class="btn btn-ghost btn-small" aria-pressed="false" hidden>スライダーで比べる</button>
+            <button type="button" id="gal-clear" class="btn btn-ghost btn-small">選択を解除</button>
+            <button type="button" id="gal-delete" class="btn btn-ghost btn-small">選んだ写真を削除</button>
+          </div>
+          <div id="gal-grid" class="gal-grid"></div>
+          <div id="gal-slider" class="compare mirror" hidden>
+            <img class="cmp-before" alt="1枚目">
+            <div class="cmp-after"><img alt="2枚目"></div>
+            <div class="cmp-handle" aria-hidden="true"></div>
+            <input type="range" class="cmp-range" min="0" max="100" value="50" aria-label="1枚目と2枚目の比較位置">
+            <span class="cmp-tag cmp-tag-l">1</span><span class="cmp-tag cmp-tag-r">2</span>
+            <p class="mirror-empty">読み込んでいます…</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- 7. 動画 -->
       <section class="step" id="step-videos" aria-labelledby="h-videos">
-        <div class="step-head"><span class="step-no" aria-hidden="true">6</span><h2 id="h-videos">動画でやり方を学ぶ</h2></div>
+        <div class="step-head"><span class="step-no" aria-hidden="true">7</span><h2 id="h-videos">動画でやり方を学ぶ</h2></div>
         <p id="videos-empty" class="lead">分析すると、提案に合ったメイク方法・ヘアセット術の動画をYouTubeとTikTokで並べて表示します。</p>
         <div class="free-search">
           <input type="search" id="video-free-input" maxlength="100" placeholder="自分で探す（例：ボブ 内巻き やり方）" aria-label="動画の検索ワード">
@@ -359,7 +409,7 @@
   </div>
 
   <footer class="site-footer">
-    <p><span class="js-app-name">かがみAI</span> <span class="js-version">v1.0.0</span></p>
+    <p><span class="js-app-name">かがみAI</span> <span class="js-version">v1.1.0</span></p>
     <p class="muted">AIの提案は参考情報です。<small class="js-earth-credit"></small></p>
   </footer>
 
@@ -369,13 +419,14 @@
     <ol class="guide-steps">
       <li><strong>写真をセット</strong>「カメラで撮る」か「写真を選ぶ」。正面・明るい場所がおすすめです。</li>
       <li><strong>AIに分析してもらう</strong>顔の形やパーソナルカラーの傾向から、似合う髪型とメイクを提案します。解説は音声でも聞けます。</li>
-      <li><strong>髪型とメイクを試す</strong>髪型を選んで「この髪型を試す」。メイクは色を選ぶだけ。スライダーで前後を比べられます。</li>
+      <li><strong>髪型とメイクを試す</strong>髪型を選んで「この髪型を試す」。メイクは雰囲気や「鼻を高く見せる」などの印象を選ぶか、言葉で指示できます。スライダーで前後を比べられます。</li>
       <li><strong>ヘア＋メイクで仕上がりを見る</strong>試した髪型に選んだメイクを重ねた完成イメージを、元の写真と比べたり、ビフォーアフター画像として保存したりできます。</li>
+      <li><strong>ギャラリーで見比べる</strong>「ギャラリーに保存」した組み合わせを一覧から選んで、並べたりスライダーで見比べたりできます。</li>
       <li><strong>動画で学ぶ</strong>提案に合ったメイク方法やヘアセット術を、YouTubeとTikTokで並べて見られます。</li>
     </ol>
     <details class="voice-help">
       <summary>話して操作できる言葉</summary>
-      <p>「カメラ」「撮影」「分析して」「解説を読んで」「止めて」「ボブにして」など髪型の名前、「メイク」「仕上がり」「動画」「使い方」。それ以外の言葉は要望欄に入ります。</p>
+      <p>「カメラ」「撮影」「分析して」「解説を読んで」「止めて」「ボブにして」など髪型の名前、「メイク」「仕上がり」「ギャラリー」「動画」「使い方」。それ以外の言葉は要望欄に入ります。</p>
     </details>
     <form method="dialog"><button class="btn btn-primary">はじめる</button></form>
   </dialog>

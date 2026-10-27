@@ -5,7 +5,7 @@
 window.CONFIG = {
   APP_NAME: 'かがみAI',
   APP_SUBTITLE: 'ヘア＆メイク試着室',
-  VERSION: 'v1.0.0',
+  VERSION: 'v1.1.0',
 
   // GASウェブアプリのURL（デプロイ後に表示される …/exec のURL）
   GAS_ENDPOINT: 'https://script.google.com/macros/s/AKfycbybkQgdG4a9qMdUOg3421jSmaAvYSN5zJ6dzBVybL86WwK6aiCNweBRnB7AH-HaO8Xa/exec',
@@ -55,6 +55,47 @@ window.CONFIG = {
     { name: 'アッシュグレー', prompt: '青みのあるアッシュグレー', hex: '#7d7f84' },
     { name: 'グレイヘア', prompt: '上品で明るいシルバーのグレイヘア', hex: '#c9c9cc' },
     { name: 'ピンクブラウン', prompt: 'ほんのり赤みのあるピンクブラウン', hex: '#8a5a5a' },
+  ],
+
+  // 見せたい印象（シェーディング・ハイライト・アイライン）
+  MAKEUP_EFFECTS: [
+    { key: 'nose', label: '鼻を高く見せる' },
+    { key: 'jaw', label: 'あごをすっきり' },
+    { key: 'small', label: '小顔に見せる' },
+    { key: 'bright', label: '明るく見せる' },
+    { key: 'eyes', label: '目元ぱっちり' },
+  ],
+
+  // メイクの雰囲気（ワンタッチで色・濃さ・印象をまとめて設定）
+  MAKEUP_PRESETS: [
+    {
+      key: 'natural', label: 'ナチュラル',
+      lip: { hex: '#C98479', name: 'ヌーディローズ', amount: 0.4 },
+      eye: { hex: '#B8946E', name: 'ベージュ', amount: 0.3 },
+      cheek: { hex: '#F2A07B', name: 'ピーチ', amount: 0.25 },
+      effects: ['bright'], strength: 0.4,
+    },
+    {
+      key: 'glam', label: '華やか',
+      lip: { hex: '#C24D6B', name: 'ローズ', amount: 0.7 },
+      eye: { hex: '#C77D8A', name: 'ピンク', amount: 0.55 },
+      cheek: { hex: '#EE8FA6', name: 'ピンク', amount: 0.4 },
+      effects: ['eyes', 'nose'], strength: 0.6,
+    },
+    {
+      key: 'formal', label: 'きちんと',
+      lip: { hex: '#B7776A', name: 'ベージュ', amount: 0.5 },
+      eye: { hex: '#7A5236', name: 'ブラウン', amount: 0.4 },
+      cheek: { hex: '#CC6B7F', name: 'ローズ', amount: 0.25 },
+      effects: ['jaw'], strength: 0.5,
+    },
+    {
+      key: 'young', label: '若々しく',
+      lip: { hex: '#E2725B', name: 'コーラル', amount: 0.55 },
+      eye: { hex: '#B8946E', name: 'ベージュ', amount: 0.3 },
+      cheek: { hex: '#F07C6C', name: 'コーラル', amount: 0.45 },
+      effects: ['bright'], strength: 0.6,
+    },
   ],
 
   MAKEUP_PALETTE: {

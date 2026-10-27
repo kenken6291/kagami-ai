@@ -1,6 +1,6 @@
 /**
  * かがみAI ～ヘア＆メイク試着室  バックエンド（Google Apps Script）
- * v1.0.0
+ * v1.1.0
  *
  * ■ スクリプトプロパティ（プロジェクトの設定 → スクリプト プロパティ）
  *   必須  GEMINI_API_KEY        … Gemini APIキー
@@ -9,14 +9,14 @@
  *   任意  GEMINI_TEXT_MODEL / GEMINI_TTS_MODEL / TTS_VOICE
  *   任意  GEMINI_IMAGE_MODEL … カンマ区切りで複数可（例: gemini-3.1-flash-image,gemini-2.5-flash-image）
  *         ※画像生成は無料枠では使えない場合があります（Google AI Studio で課金設定が必要）
- *   任意  DAILY_AI_LIMIT（既定40） / IMAGE_RETENTION_DAYS（既定7）
+ *   任意  DAILY_AI_LIMIT（既定40） / IMAGE_RETENTION_DAYS（既定7） / MAX_LOOKS（ギャラリー上限、既定30）
  *   自動  SPREADSHEET_ID / DRIVE_FOLDER_ID / PEPPER … setup() 実行時に自動作成
  *
  * ■ 初回だけ setup() を実行 → ウェブアプリとしてデプロイ（実行ユーザー: 自分 / アクセス: 全員）
  * ■ コードを変更したら「デプロイを管理 → 編集 → 新バージョン」で再デプロイが必要です
  */
 
-const APP_VERSION = 'v1.0.0';
+const APP_VERSION = 'v1.1.0';
 const TERMS_VERSION = '2026-10-27';
 const SESSION_TTL = 21600;      // 6時間（CacheServiceの上限）
 const MAX_FAILS = 5;            // ログイン失敗の上限
@@ -34,6 +34,10 @@ const SHEETS = {
     headers: ['historyId', 'userId', 'createdAt', 'imageFileId', 'faceShape', 'personalColor',
       'hairStyle', 'request', 'analysisJson'],
   },
+  LOOKS: {
+    name: 'Looks',
+    headers: ['lookId', 'userId', 'createdAt', 'fileId', 'thumb', 'hairLabel', 'summary', 'metaJson'],
+  },
   LOGS: {
     name: 'Logs',
     headers: ['at', 'userId', 'action', 'detail'],
@@ -50,6 +54,7 @@ const DEFAULTS = {
   TTS_VOICE: 'Kore',
   DAILY_AI_LIMIT: '40',
   IMAGE_RETENTION_DAYS: '7',
+  MAX_LOOKS: '30',
 };
 
 /* =========================================================
@@ -146,6 +151,11 @@ const ROUTES = {
   videos: videos_,
   history: history_,
   deleteMyImages: deleteMyImages_,
+  makeupPlan: makeupPlan_,
+  saveLook: saveLook_,
+  listLooks: listLooks_,
+  getLooks: getLooks_,
+  deleteLook: deleteLook_,
 };
 
 function json_(obj) {
@@ -593,13 +603,165 @@ function deleteMyImages_(req) {
   const s = requireActive_(req.token);
   const root = DriveApp.getFolderById(prop_('DRIVE_FOLDER_ID'));
   const it = root.getFoldersByName(s.userId);
-  let count = 0;
+  let temp = 0;
+  let looks = 0;
   if (it.hasNext()) {
-    const files = it.next().getFiles();
-    while (files.hasNext()) { files.next().setTrashed(true); count++; }
+    const folder = it.next();
+    const files = folder.getFiles();
+    while (files.hasNext()) { files.next().setTrashed(true); temp++; }
+    const lf = folder.getFoldersByName('looks');
+    if (lf.hasNext()) {
+      const lfiles = lf.next().getFiles();
+      while (lfiles.hasNext()) { lfiles.next().setTrashed(true); }
+    }
   }
-  log_(s.userId, 'deleteMyImages', String(count));
-  return { message: '保存されていた写真 ' + count + ' 枚を削除しました。' };
+  // ギャラリーの行も削除（下から）
+  const sh = sheet_('LOOKS');
+  const data = sh.getDataRange().getValues();
+  for (let r = data.length - 1; r >= 1; r--) {
+    if (data[r][1] === s.userId) { sh.deleteRow(r + 1); looks++; }
+  }
+  log_(s.userId, 'deleteMyImages', temp + '/' + looks);
+  return { message: '一時保存の写真 ' + temp + ' 枚と、ギャラリーの写真 ' + looks + ' 枚を削除しました。' };
+}
+
+/* =========================================================
+ * メイクの指示 → AIがメイク設定を作る
+ * ========================================================= */
+const MAKEUP_PROMPT = [
+  'あなたはプロのメイクアップアーティストです。',
+  '次の希望に合うメイクを、バーチャルメイクの設定値として提案してください。',
+  '',
+  '希望: {TEXT}',
+  '参考: 顔の形={FACE}、パーソナルカラーの傾向={PC}',
+  '',
+  '次のJSONだけを返してください（説明文やコードブロックは不要）。',
+  '{',
+  ' "lip":   {"name": "色名", "hex": "#RRGGBB", "amount": 0〜1},',
+  ' "eye":   {"name": "色名", "hex": "#RRGGBB", "amount": 0〜1},',
+  ' "cheek": {"name": "色名", "hex": "#RRGGBB", "amount": 0〜1},',
+  ' "effects": {"nose": 0〜1, "jaw": 0〜1, "small": 0〜1, "bright": 0〜1, "eyes": 0〜1},',
+  ' "comment": "どんな狙いで仕上げたか（80字以内、やわらかい話し言葉）"',
+  '}',
+  '',
+  'effects の意味: nose=鼻を高く見せるシェーディングとハイライト、jaw=あご・フェイスラインをすっきり見せるシェーディング、',
+  'small=小顔に見せる輪郭のシェーディング、bright=顔を明るく見せるトーンアップとハイライト、eyes=目元をぱっちり見せるアイライン。',
+  '希望に関係ない効果は0にする。amount は自然に見える範囲（リップ0.3〜0.7、アイ0.2〜0.6、チーク0.2〜0.5目安）。',
+  'その部位を塗らない方がよい場合は、その部位を null にする。',
+].join('\n');
+
+function makeupPlan_(req) {
+  const s = requireActive_(req.token);
+  useQuota_(s.userId);
+  const text = sanitizeText_(req.text, 300);
+  if (!text) throw new Error('どんなメイクにしたいか入力してください。');
+  const ctx = req.context || {};
+  const prompt = MAKEUP_PROMPT
+    .replace('{TEXT}', text)
+    .replace('{FACE}', sanitizeText_(ctx.faceShape, 30) || '不明')
+    .replace('{PC}', sanitizeText_(ctx.personalColor, 30) || '不明');
+  const res = callGemini_(prop_('GEMINI_TEXT_MODEL'), {
+    contents: [{ role: 'user', parts: [{ text: prompt }] }],
+    generationConfig: { responseMimeType: 'application/json', temperature: 0.6 },
+  });
+  let plan;
+  try {
+    plan = JSON.parse(extractText_(res).replace(/```json|```/g, '').trim());
+  } catch (e) {
+    throw new Error('AIの提案を読み取れませんでした。もう一度お試しください。');
+  }
+  log_(s.userId, 'makeupPlan', text.slice(0, 60));
+  return { plan: plan };
+}
+
+/* =========================================================
+ * ギャラリー（保存した ヘア＋メイク）
+ * ========================================================= */
+function looksFolder_(userId) {
+  const uf = userFolder_(userId);
+  const it = uf.getFoldersByName('looks');
+  return it.hasNext() ? it.next() : uf.createFolder('looks');
+}
+
+function saveLook_(req) {
+  const s = requireActive_(req.token);
+  const img = checkImage_(req.image, 'image/jpeg');
+  const thumb = String(req.thumb || '').replace(/^data:[^,]+,/, '');
+  if (!thumb || thumb.length > 45000) throw new Error('サムネイル画像を作れませんでした。');
+
+  const max = Number(prop_('MAX_LOOKS'));
+  const sh = sheet_('LOOKS');
+  const data = sh.getDataRange().getValues();
+  let count = 0;
+  for (let r = 1; r < data.length; r++) if (data[r][1] === s.userId) count++;
+  if (count >= max) throw new Error('ギャラリーは' + max + '枚までです。不要な写真を削除してから保存してください。');
+
+  const meta = req.meta || {};
+  const now = new Date();
+  const name = 'look_' + Utilities.formatDate(now, 'Asia/Tokyo', 'yyyyMMdd_HHmmss') + '.jpg';
+  const fileId = looksFolder_(s.userId).createFile(
+    Utilities.newBlob(Utilities.base64Decode(img.b64), 'image/jpeg', name)).getId();
+  const lookId = 'L' + now.getTime().toString(36) + Utilities.getUuid().slice(0, 4);
+  const hairLabel = sanitizeText_(meta.hair, 60);
+  const summary = sanitizeText_(meta.summary, 300);
+  sh.appendRow([lookId, s.userId, now, fileId, thumb, safe_(hairLabel), safe_(summary), JSON.stringify(meta).slice(0, 5000)]);
+  log_(s.userId, 'saveLook', lookId);
+  return {
+    message: 'ギャラリーに保存しました。',
+    look: { lookId: lookId, createdAt: now.toISOString(), thumb: thumb, hairLabel: hairLabel, summary: summary },
+  };
+}
+
+function listLooks_(req) {
+  const s = requireActive_(req.token);
+  const data = sheet_('LOOKS').getDataRange().getValues();
+  const h = data[0];
+  const items = [];
+  for (let r = data.length - 1; r >= 1; r--) {
+    const o = rowToObj_(h, data[r]);
+    if (o.userId !== s.userId) continue;
+    items.push({
+      lookId: o.lookId,
+      createdAt: o.createdAt instanceof Date ? o.createdAt.toISOString() : String(o.createdAt),
+      thumb: String(o.thumb),
+      hairLabel: String(o.hairLabel || ''),
+      summary: String(o.summary || ''),
+    });
+  }
+  return { items: items };
+}
+
+function getLooks_(req) {
+  const s = requireActive_(req.token);
+  const ids = (Array.isArray(req.ids) ? req.ids : []).slice(0, 4).map(String);
+  const data = sheet_('LOOKS').getDataRange().getValues();
+  const items = [];
+  for (let r = 1; r < data.length; r++) {
+    if (data[r][1] !== s.userId || ids.indexOf(String(data[r][0])) < 0) continue;
+    try {
+      const blob = DriveApp.getFileById(String(data[r][3])).getBlob();
+      items.push({ lookId: String(data[r][0]), mimeType: blob.getContentType() || 'image/jpeg', image: Utilities.base64Encode(blob.getBytes()) });
+    } catch (e) {
+      items.push({ lookId: String(data[r][0]), mimeType: 'image/jpeg', image: String(data[r][4]) }); // 本画像が無い場合はサムネイル
+    }
+  }
+  return { items: items };
+}
+
+function deleteLook_(req) {
+  const s = requireActive_(req.token);
+  const id = String(req.lookId || '');
+  const sh = sheet_('LOOKS');
+  const data = sh.getDataRange().getValues();
+  for (let r = data.length - 1; r >= 1; r--) {
+    if (String(data[r][0]) === id && data[r][1] === s.userId) {
+      try { DriveApp.getFileById(String(data[r][3])).setTrashed(true); } catch (e) { /* noop */ }
+      sh.deleteRow(r + 1);
+      log_(s.userId, 'deleteLook', id);
+      return { message: '削除しました。' };
+    }
+  }
+  throw new Error('写真が見つかりませんでした。');
 }
 
 /* ---------- Gemini ---------- */
@@ -698,7 +860,15 @@ function cleanupOldImages() {
  * スプレッドシート・共通
  * ========================================================= */
 function sheet_(key) {
-  return SpreadsheetApp.openById(prop_('SPREADSHEET_ID')).getSheetByName(SHEETS[key].name);
+  const ss = SpreadsheetApp.openById(prop_('SPREADSHEET_ID'));
+  const def = SHEETS[key];
+  let sh = ss.getSheetByName(def.name);
+  if (!sh) { // 新しいシートは自動で作成（setup の再実行は不要）
+    sh = ss.insertSheet(def.name);
+    sh.appendRow(def.headers);
+    sh.setFrozenRows(1);
+  }
+  return sh;
 }
 function rowToObj_(headers, row) {
   const o = {};

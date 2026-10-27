@@ -6,7 +6,9 @@
  *   必須  GEMINI_API_KEY        … Gemini APIキー
  *   任意  YOUTUBE_API_KEY       … YouTube Data API v3 キー（無ければ動画は「YouTubeで開く」リンクのみ）
  *   任意  APP_NAME / APP_URL    … メール本文に使うアプリ名・公開URL
- *   任意  GEMINI_TEXT_MODEL / GEMINI_IMAGE_MODEL / GEMINI_TTS_MODEL / TTS_VOICE
+ *   任意  GEMINI_TEXT_MODEL / GEMINI_TTS_MODEL / TTS_VOICE
+ *   任意  GEMINI_IMAGE_MODEL … カンマ区切りで複数可（例: gemini-3.1-flash-image,gemini-2.5-flash-image）
+ *         ※画像生成は無料枠では使えない場合があります（Google AI Studio で課金設定が必要）
  *   任意  DAILY_AI_LIMIT（既定40） / IMAGE_RETENTION_DAYS（既定7）
  *   自動  SPREADSHEET_ID / DRIVE_FOLDER_ID / PEPPER … setup() 実行時に自動作成
  *
@@ -42,7 +44,8 @@ const DEFAULTS = {
   APP_NAME: 'かがみAI',
   APP_URL: 'https://kenken6291.github.io/kagami-ai/',
   GEMINI_TEXT_MODEL: 'gemini-2.5-flash',
-  GEMINI_IMAGE_MODEL: 'gemini-2.5-flash-image',
+  // カンマ区切りで複数指定すると、失敗時に順番に試す
+  GEMINI_IMAGE_MODEL: 'gemini-3.1-flash-image,gemini-2.5-flash-image,gemini-3.1-flash-lite-image',
   GEMINI_TTS_MODEL: 'gemini-2.5-flash-preview-tts',
   TTS_VOICE: 'Kore',
   DAILY_AI_LIMIT: '40',
@@ -433,34 +436,91 @@ function hairEdit_(req) {
   const extra = sanitizeText_(req.extra, 200);
   if (!style) throw new Error('試したい髪型を選んでください。');
 
-  const prompt = [
-    'この写真の人物の「髪型」だけを変えた写真を1枚生成してください。',
-    '新しい髪型: ' + style,
-    '髪色: ' + (color || '元の髪色のまま'),
-    extra ? '追加の要望: ' + extra : '',
-    '厳守事項: 顔立ち・目鼻口の形・肌・表情・メイク・服装・背景・構図・画角・照明は元の写真のまま変えないこと。',
-    '別人にしないこと。文字・ロゴ・枠を入れないこと。自然で写実的な写真に仕上げること。',
-  ].filter(Boolean).join('\n');
+  // 英語の指示のほうが画像編集が安定しやすいため、英語→日本語の順で試す
+  const prompts = [
+    [
+      'Edit this photo. Change ONLY the hairstyle.',
+      'New hairstyle: ' + style,
+      'Hair color: ' + (color || 'keep the original hair color'),
+      extra ? 'Additional request: ' + extra : '',
+      'Keep the same face, facial features, skin, expression, makeup, clothing, background, framing and lighting exactly as in the original photo.',
+      'Photorealistic hair salon style preview. Do not add any text, logos or borders.',
+    ].filter(Boolean).join('\n'),
+    [
+      'この写真の髪型だけを変更してください（美容院のヘアスタイル試着イメージ）。',
+      '新しい髪型: ' + style,
+      '髪色: ' + (color || '元の髪色のまま'),
+      extra ? '追加の要望: ' + extra : '',
+      '顔・表情・肌・メイク・服装・背景・構図・照明は元の写真のまま、同じ人物のままにしてください。',
+      '写実的な写真に仕上げ、文字やロゴは入れないでください。',
+    ].filter(Boolean).join('\n'),
+  ];
 
-  const res = callGemini_(prop_('GEMINI_IMAGE_MODEL'), {
-    contents: [{
-      role: 'user',
-      parts: [{ inlineData: { mimeType: img.mime, data: img.b64 } }, { text: prompt }],
-    }],
-    generationConfig: { responseModalities: ['TEXT', 'IMAGE'] },
-  });
+  const models = prop_('GEMINI_IMAGE_MODEL').split(',').map(function (m) { return m.trim(); }).filter(String);
+  const reasons = [];
 
-  const part = findInline_(res, 'image/');
-  if (!part) {
-    const t = extractText_(res);
-    throw new Error('髪型の画像を作れませんでした。' +
-      (t ? '（AIの応答: ' + t.slice(0, 80) + '）' : '別の写真や髪型でお試しください。'));
+  for (let mi = 0; mi < models.length; mi++) {
+    const model = models[mi];
+    for (let pi = 0; pi < prompts.length; pi++) {
+      const r = callGeminiRaw_(model, {
+        contents: [{
+          role: 'user',
+          parts: [{ inlineData: { mimeType: img.mime, data: img.b64 } }, { text: prompts[pi] }],
+        }],
+        generationConfig: { responseModalities: ['TEXT', 'IMAGE'] },
+      });
+
+      if (r.code !== 200) {
+        const why = 'HTTP ' + r.code + (r.message ? ' ' + r.message.slice(0, 150) : '');
+        reasons.push({ model: model, kind: r.code === 429 ? 'quota' : 'http', detail: why });
+        log_(s.userId, 'hairEditFail', model + ' ' + why);
+        break; // このモデルは使えないので次のモデルへ
+      }
+
+      const part = findInline_(r.json, 'image/');
+      if (part) {
+        const mime = part.mimeType || 'image/png';
+        const fileId = saveImage_(s.userId, part.data, mime, 'hair');
+        if (req.historyId) updateHistoryHair_(String(req.historyId), s.userId, style);
+        log_(s.userId, 'hairEdit', model + ' ' + style.slice(0, 40));
+        return { image: part.data, mimeType: mime, fileId: fileId, model: model };
+      }
+
+      const why = describeNoImage_(r.json);
+      reasons.push({ model: model, kind: why.safety ? 'safety' : 'noimage', detail: why.text });
+      log_(s.userId, 'hairEditFail', model + ' ' + why.text);
+    }
   }
-  const mime = part.mimeType || 'image/png';
-  const fileId = saveImage_(s.userId, part.data, mime, 'hair');
-  if (req.historyId) updateHistoryHair_(String(req.historyId), s.userId, style);
-  log_(s.userId, 'hairEdit', style.slice(0, 40));
-  return { image: part.data, mimeType: mime, fileId: fileId };
+  throw new Error(hairErrorMessage_(reasons));
+}
+
+/** 画像が返ってこなかった理由をまとめる */
+function describeNoImage_(json) {
+  const fb = json && json.promptFeedback;
+  const c = json && json.candidates && json.candidates[0];
+  const block = fb && fb.blockReason ? fb.blockReason : '';
+  const finish = c && c.finishReason ? c.finishReason : '';
+  const text = extractText_(json);
+  const safety = /SAFETY|PROHIBITED|BLOCK|RECITATION|OTHER/.test(block + ' ' + finish);
+  return {
+    safety: safety,
+    text: [block && 'block=' + block, finish && 'finish=' + finish, text && 'text=' + text.slice(0, 100)]
+      .filter(String).join(' ') || '応答に画像なし',
+  };
+}
+
+/** 利用者向けのエラーメッセージ */
+function hairErrorMessage_(reasons) {
+  if (!reasons.length) return '髪型の画像を作れませんでした。';
+  const kinds = reasons.map(function (r) { return r.kind; });
+  const last = reasons[reasons.length - 1];
+  if (kinds.indexOf('safety') >= 0) {
+    return 'AIの安全フィルターにより、この写真の加工が止められました。顔が大きく写った正面の写真や、別の髪型でお試しください。（' + last.model + ' ' + last.detail + '）';
+  }
+  if (kinds.every(function (k) { return k === 'quota' || k === 'http'; })) {
+    return '画像を作るAIを利用できませんでした。画像生成は無料枠では使えない場合があるため、Google AI Studio で APIキーの課金設定をご確認ください。（' + last.model + ' ' + last.detail + '）';
+  }
+  return '髪型の画像を作れませんでした。別の写真や髪型でお試しください。（' + last.model + ' ' + last.detail + '）';
 }
 
 function tts_(req) {
@@ -543,7 +603,7 @@ function deleteMyImages_(req) {
 }
 
 /* ---------- Gemini ---------- */
-function callGemini_(model, body) {
+function callGeminiRaw_(model, body) {
   const key = prop_('GEMINI_API_KEY');
   if (!key) throw new Error('サーバーにGemini APIキーが設定されていません。');
   const url = 'https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent';
@@ -558,15 +618,24 @@ function callGemini_(model, body) {
   for (let i = 0; i < 2; i++) {
     res = UrlFetchApp.fetch(url, opt);
     const code = res.getResponseCode();
-    if (code === 200) return JSON.parse(res.getContentText());
     if (code !== 429 && code !== 503) break;
     Utilities.sleep(2000);
   }
-  let msg = '';
-  try { msg = JSON.parse(res.getContentText()).error.message; } catch (e) { /* noop */ }
-  if (res.getResponseCode() === 429) throw new Error('AIが混み合っています。少し待ってからお試しください。');
-  throw new Error('AIの処理に失敗しました（' + res.getResponseCode() + '）' + (msg ? ': ' + msg.slice(0, 120) : ''));
+  const code = res.getResponseCode();
+  let json = null;
+  let message = '';
+  try { json = JSON.parse(res.getContentText()); } catch (e) { /* noop */ }
+  if (code !== 200 && json && json.error) message = String(json.error.message || '');
+  return { code: code, json: json, message: message };
 }
+
+function callGemini_(model, body) {
+  const r = callGeminiRaw_(model, body);
+  if (r.code === 200 && r.json) return r.json;
+  if (r.code === 429) throw new Error('AIが混み合っているか、利用上限に達しています。少し待ってからお試しください。');
+  throw new Error('AIの処理に失敗しました（' + r.code + '）' + (r.message ? ': ' + r.message.slice(0, 120) : ''));
+}
+
 function parts_(res) {
   const c = res && res.candidates && res.candidates[0];
   return (c && c.content && c.content.parts) || [];

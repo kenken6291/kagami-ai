@@ -1,9 +1,10 @@
-/* かがみAI app.js v1.4.0 */
+/* かがみAI app.js v1.5.0 */
 const C = window.CONFIG;
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
 const TOKEN_KEY = 'kagami_token';
 const GUIDE_KEY = 'kagami_guide_seen';
+const PENDING_LOOK_KEY = 'kagami_pending_look';
 const MAKEUP_PARTS = ['base', 'lip', 'eye', 'cheek'];
 
 const state = {
@@ -29,6 +30,7 @@ const state = {
   landmarks: { original: null, hair: null }, // null=未検出 / false=顔なし / 配列
   audio: null,
   narrating: false,
+  serverVersion: '',
 };
 
 /* =========================================================
@@ -87,12 +89,25 @@ async function api(action, data = {}) {
   try { json = await res.json(); } catch (e) {
     throw new Error('サーバーの応答を読み取れませんでした。GASのデプロイ設定（アクセス：全員）を確認してください。');
   }
+  if (json.version) noteServerVersion(json.version);
   if (!json.ok) {
     if (json.code === 'AUTH') { clearSession(); showView('login'); }
     if (json.code === 'MUST_CHANGE') openChange(true);
     throw new Error(json.error || 'エラーが発生しました。');
   }
   return json;
+}
+
+/** サーバー（GAS）のバージョンを表示し、フロントと違えば知らせる */
+function noteServerVersion(v) {
+  if (state.serverVersion === v) return;
+  state.serverVersion = v;
+  const sv = $('#server-version');
+  if (sv) sv.textContent = `（サーバー ${v}）`;
+  if (v !== C.VERSION) {
+    console.warn(`バージョン不一致: 画面 ${C.VERSION} / サーバー ${v}`);
+    toast(`画面（${C.VERSION}）とサーバー（${v}）のバージョンが違います。GASを「新バージョン」でデプロイし直すか、画面を再読み込みしてください。`, 'error');
+  }
 }
 
 async function run(task, text) {
@@ -246,8 +261,30 @@ function enterMain() {
   state.forceChange = false;
   $('#user-name').textContent = state.user?.nickname || '';
   showView('main');
-  loadGallery(true);
-  if (!localStorage.getItem(GUIDE_KEY)) openGuide();
+  loadGallery(true).then(() => renderShareList());
+  loadMembers();
+  loadSharedWithMe();
+  if (sessionStorage.getItem(PENDING_LOOK_KEY)) {
+    const id = sessionStorage.getItem(PENDING_LOOK_KEY);
+    sessionStorage.removeItem(PENDING_LOOK_KEY);
+    $('#share-notice').hidden = true;
+    openSharedLook(id);
+  } else if (!localStorage.getItem(GUIDE_KEY)) {
+    openGuide();
+  }
+}
+
+/** LINEなどで届いたリンク（?look=ID）を受け取る */
+function capturePendingLook() {
+  const params = new URLSearchParams(location.search);
+  const id = params.get('look');
+  if (id && /^[A-Za-z0-9_-]{4,40}$/.test(id)) {
+    sessionStorage.setItem(PENDING_LOOK_KEY, id);
+    params.delete('look');
+    const q = params.toString();
+    history.replaceState(null, '', location.pathname + (q ? '?' + q : '') + location.hash);
+  }
+  $('#share-notice').hidden = !sessionStorage.getItem(PENDING_LOOK_KEY);
 }
 
 async function restoreSession() {
@@ -303,6 +340,7 @@ function bindAuth() {
     const nickname = $('#reg-nickname').value.trim();
     if (!email || !nickname) return toast('メールアドレスとニックネームを入力してください。', 'error');
     const agreements = {
+      cautions: $('#agree-cautions').checked,
       terms: $('#agree-terms').checked,
       disclaimer: $('#agree-disclaimer').checked,
       selfResponsibility: $('#agree-self').checked,
@@ -367,6 +405,9 @@ function bindMenu() {
 
   $('#guide').addEventListener('close', () => localStorage.setItem(GUIDE_KEY, '1'));
   $('#menu-guide').addEventListener('click', () => { close(); openGuide(); });
+  $$('.js-open-guide').forEach(b => b.addEventListener('click', openGuide));
+  $('#menu-share').addEventListener('click', () => { close(); $('#step-share').scrollIntoView({ behavior: 'smooth', block: 'start' }); });
+  $('#menu-shared').addEventListener('click', () => { close(); loadSharedWithMe(); $('#step-shared').scrollIntoView({ behavior: 'smooth', block: 'start' }); });
   $('#menu-password').addEventListener('click', () => { close(); openChange(false); });
   $('#menu-history').addEventListener('click', async () => {
     close();
@@ -387,7 +428,7 @@ function bindMenu() {
     close();
     if (!confirm('サーバーに保存されているあなたの写真（一時保存とギャラリー）をすべて削除します。よろしいですか？')) return;
     const r = await run(() => api('deleteMyImages'), '削除しています…');
-    if (r) { toast(r.message, 'success'); resetGallery(); }
+    if (r) { toast(r.message, 'success'); resetGallery(); renderShareList(); }
   });
   $('#menu-logout').addEventListener('click', async () => {
     close();
@@ -395,6 +436,7 @@ function bindMenu() {
     try { await api('logout'); } catch (e) { /* noop */ }
     clearSession();
     resetGallery();
+    resetShare();
     showView('login');
     toast('ログアウトしました。');
   });
@@ -1333,6 +1375,7 @@ function renderGallery() {
       'aria-label': `${fmtDate(it.createdAt)} ${it.summary || ''}`,
     },
     idx >= 0 ? el('span', { class: 'gal-badge' }, String(idx + 1)) : null,
+    it.shared ? el('span', { class: 'pub-badge' }, '公開中') : null,
     el('img', { src: 'data:image/jpeg;base64,' + it.thumb, alt: '' }),
     el('span', { class: 'gal-cap' }, fmtDate(it.createdAt), el('small', {}, it.hairLabel || '')));
     b.addEventListener('click', () => toggleLook(it.lookId));
@@ -1434,6 +1477,7 @@ async function saveToGallery(source) {
   gallery.items.unshift(r.look);
   gallery.loaded = true;
   renderGallery();
+  renderShareList();
   toast(r.message + '（6で見比べられます）', 'success');
 }
 
@@ -1456,11 +1500,299 @@ async function deleteSelectedLooks() {
     gallery.selected = [];
     gallery.slider = false;
     renderGallery();
+    renderShareList();
   }
 }
 
 /* =========================================================
- * 5. 動画
+ * 8. 家族・友人と共有（指定した会員にだけ公開）
+ *    ・写真は保存した時点では必ず非公開
+ *    ・スイッチ1つで公開／非公開、見せる相手は写真ごとに選べる
+ * ========================================================= */
+const share = { members: [], loaded: false, received: [] };
+
+function resetShare() {
+  share.members = [];
+  share.loaded = false;
+  share.received = [];
+  renderMembers();
+  renderShareList();
+  renderSharedWithMe();
+}
+
+const memberName = m => m.label ? `${m.label}（${m.nickname}）` : m.nickname;
+
+async function loadMembers() {
+  try {
+    const r = await api('listMembers');
+    share.members = r.items || [];
+    share.loaded = true;
+  } catch (e) {
+    $('#member-empty').hidden = false;
+    $('#member-empty').textContent = '公開相手を読み込めませんでした：' + e.message;
+    return;
+  }
+  renderMembers();
+  renderShareList();
+}
+
+function switchEl(checked, label, onChange) {
+  const input = el('input', { type: 'checkbox', role: 'switch', class: 'switch-input' });
+  input.checked = !!checked;
+  input.addEventListener('change', () => onChange(input.checked, input));
+  return el('label', { class: 'switch' }, input, el('span', { class: 'switch-track', 'aria-hidden': 'true' }), el('span', { class: 'switch-text' }, label));
+}
+
+function renderMembers() {
+  const list = $('#member-list');
+  $('#member-empty').hidden = share.members.length > 0;
+  if (share.loaded || !share.members.length) $('#member-empty').textContent = 'まだ公開相手はいません。';
+  list.replaceChildren(...share.members.map(m => {
+    const sw = switchEl(m.active, m.active ? '見せる' : '停止中', async (on, input) => {
+      input.disabled = true;
+      try {
+        await api('updateMember', { memberId: m.memberId, active: on });
+        m.active = on;
+        toast(on ? `${memberName(m)}さんに見せるようにしました。` : `${memberName(m)}さんへの公開を止めました。`, 'success');
+      } catch (e) {
+        input.checked = !on;
+        toast(e.message, 'error');
+      } finally {
+        input.disabled = false;
+        renderMembers();
+        renderShareList();
+      }
+    });
+    const rm = el('button', { type: 'button', class: 'btn btn-ghost btn-small' }, '外す');
+    rm.addEventListener('click', async () => {
+      if (!confirm(`${memberName(m)}さんを公開相手から外します。この方はあなたの写真を見られなくなります。よろしいですか？`)) return;
+      const r = await run(() => api('removeMember', { memberId: m.memberId }), '変更しています…');
+      if (!r) return;
+      share.members = share.members.filter(x => x.memberId !== m.memberId);
+      gallery.items.forEach(it => { it.audience = (it.audience || []).filter(id => id !== m.memberId); });
+      toast(r.message, 'success');
+      renderMembers();
+      renderShareList();
+    });
+    return el('li', { class: 'member-row' + (m.active ? '' : ' is-off') },
+      el('span', { class: 'member-name' }, el('strong', {}, m.label || m.nickname), m.label ? el('small', { class: 'muted' }, m.nickname) : null,
+        m.available ? null : el('small', { class: 'hint' }, '利用停止中の会員です')),
+      sw, rm);
+  }));
+}
+
+async function addMember(e) {
+  e.preventDefault();
+  const email = $('#member-email').value.trim();
+  const label = $('#member-label').value.trim();
+  if (!email) return toast('相手のメールアドレスを入力してください。', 'error');
+  const r = await run(() => api('addMember', { email, label }), '公開相手を追加しています…');
+  if (!r) return;
+  share.members.push(r.member);
+  $('#member-form').reset();
+  toast(r.message + '　写真のスイッチを「公開」にすると見られるようになります。', 'success');
+  renderMembers();
+  renderShareList();
+}
+
+function renderShareList() {
+  const list = $('#share-list');
+  if (!list) return;
+  const items = gallery.items;
+  $('#share-empty').hidden = items.length > 0;
+  const pub = items.filter(i => i.shared).length;
+  $('#share-count').textContent = items.length ? `公開中 ${pub}枚／全${items.length}枚` : '';
+  list.replaceChildren(...items.map(it => {
+    const row = el('li', { class: 'share-row' + (it.shared ? ' is-public' : '') });
+    const sw = switchEl(it.shared, it.shared ? '公開' : '非公開', (on, input) => setLookShared(it, on, input));
+    const send = el('button', { type: 'button', class: 'btn btn-line btn-small' }, 'LINEなどで送る');
+    send.addEventListener('click', () => sendLook(it));
+
+    const audience = el('div', { class: 'audience' });
+    if (it.shared) {
+      const aud = it.audience || [];
+      const all = el('button', { type: 'button', class: 'chip chip-small', 'aria-pressed': String(aud.length === 0) }, '公開相手の全員');
+      all.addEventListener('click', () => setAudience(it, []));
+      audience.append(el('span', { class: 'muted audience-label' }, '見せる相手：'), all,
+        ...share.members.map(m => {
+          const on = aud.includes(m.memberId);
+          const b = el('button', { type: 'button', class: 'chip chip-small' + (m.active ? '' : ' is-off'), 'aria-pressed': String(on) },
+            (m.label || m.nickname) + (m.active ? '' : '（停止中）'));
+          b.addEventListener('click', () => {
+            const next = on ? aud.filter(x => x !== m.memberId) : [...aud, m.memberId];
+            if (!next.length && on) toast('相手を選ばないときは、公開相手の全員に見えます。');
+            setAudience(it, next);
+          });
+          return b;
+        }));
+    }
+    row.append(
+      el('img', { src: 'data:image/jpeg;base64,' + it.thumb, alt: '', class: 'share-thumb' }),
+      el('div', { class: 'share-body' },
+        el('strong', {}, fmtDate(it.createdAt)),
+        el('span', { class: 'muted share-sum' }, it.hairLabel || it.summary || ''),
+        el('div', { class: 'share-ctrl' }, sw, send),
+        audience));
+    return row;
+  }));
+}
+
+async function setLookShared(it, on, input) {
+  if (on && !share.members.length) {
+    input.checked = false;
+    toast('先に「公開相手」を追加してください。', 'error');
+    $('#member-email').focus();
+    return false;
+  }
+  if (input) input.disabled = true;
+  try {
+    const r = await api('setLookShare', { lookId: it.lookId, shared: on, audience: it.audience || [] });
+    it.shared = r.shared;
+    it.audience = r.audience;
+    toast(r.message, 'success');
+    return true;
+  } catch (e) {
+    if (input) input.checked = !on;
+    toast(e.message, 'error');
+    return false;
+  } finally {
+    if (input) input.disabled = false;
+    renderShareList();
+    renderGallery();
+  }
+}
+
+async function setAudience(it, ids) {
+  const prev = it.audience;
+  it.audience = ids;
+  renderShareList();
+  try {
+    const r = await api('setLookShare', { lookId: it.lookId, shared: true, audience: ids });
+    it.audience = r.audience;
+  } catch (e) {
+    it.audience = prev;
+    toast(e.message, 'error');
+  }
+  renderShareList();
+}
+
+async function setAllPrivate() {
+  if (!gallery.items.some(i => i.shared)) return toast('公開中の写真はありません。');
+  if (!confirm('公開中の写真を、すべて非公開にします。よろしいですか？')) return;
+  const r = await run(() => api('setAllPrivate'), '変更しています…');
+  if (!r) return;
+  gallery.items.forEach(i => { i.shared = false; });
+  toast(r.message, 'success');
+  renderShareList();
+  renderGallery();
+}
+
+/* ---------- リンクを送る（LINE・ほかのアプリ・メール・コピー） ---------- */
+function appUrl() {
+  const u = (C.SHARE && C.SHARE.APP_URL) || (location.origin + location.pathname);
+  return u.replace(/[?#].*$/, '');
+}
+const fillMsg = (tpl, name) => String(tpl || '').replaceAll('{name}', name || '').replaceAll('{app}', C.APP_NAME);
+
+function openSendDialog({ title, note, text, url }) {
+  const full = `${text}\n${url}`;
+  $('#send-title').textContent = title;
+  $('#send-note').textContent = note || '';
+  $('#send-url').value = url;
+  $('#send-line').href = 'https://line.me/R/share?text=' + encodeURIComponent(full);
+  $('#send-mail').href = 'mailto:?subject=' + encodeURIComponent(C.APP_NAME) + '&body=' + encodeURIComponent(full);
+  const other = $('#send-other');
+  other.hidden = !navigator.share;
+  other.onclick = async () => {
+    try { await navigator.share({ title: C.APP_NAME, text, url }); } catch (e) { /* キャンセル */ }
+  };
+  $('#send-copy').onclick = async () => {
+    try {
+      await navigator.clipboard.writeText(full);
+      toast('リンクをコピーしました。', 'success');
+    } catch (e) {
+      $('#send-url').select();
+      toast('リンクを長押し（または選択）してコピーしてください。');
+    }
+  };
+  $('#send-dlg').showModal();
+}
+
+async function sendLook(it) {
+  if (!it.shared) {
+    if (!share.members.length) {
+      toast('先に「公開相手」を追加してください。リンクは公開相手だけが開けます。', 'error');
+      $('#member-email').focus();
+      return;
+    }
+    if (!confirm('この写真は非公開です。公開にしてからリンクを送りますか？')) return;
+    const ok = await setLookShared(it, true, null);
+    if (!ok) return;
+  }
+  const aud = it.audience || [];
+  const who = aud.length
+    ? share.members.filter(m => aud.includes(m.memberId)).map(m => m.label || m.nickname).join('、')
+    : '公開相手の全員';
+  openSendDialog({
+    title: 'この写真のリンクを送る',
+    note: `リンクを開いてログインした「${who}」だけが見られます。それ以外の人には表示されません。`,
+    text: fillMsg(C.SHARE?.LOOK_MESSAGE, state.user?.nickname),
+    url: appUrl() + '?look=' + encodeURIComponent(it.lookId),
+  });
+}
+
+function inviteByLine() {
+  openSendDialog({
+    title: '登録を案内する',
+    note: '相手が会員登録したら、登録したメールアドレスを教えてもらい、「公開相手」に追加してください。',
+    text: fillMsg(C.SHARE?.INVITE_MESSAGE, state.user?.nickname),
+    url: appUrl(),
+  });
+}
+
+/* =========================================================
+ * 9. 見せてもらった写真
+ * ========================================================= */
+async function loadSharedWithMe() {
+  try {
+    const r = await api('sharedWithMe');
+    share.received = r.items || [];
+  } catch (e) {
+    $('#shared-empty').hidden = false;
+    $('#shared-empty').textContent = '読み込めませんでした：' + e.message;
+    return;
+  }
+  renderSharedWithMe();
+}
+
+function renderSharedWithMe() {
+  const list = $('#shared-list');
+  if (!list) return;
+  $('#shared-empty').hidden = share.received.length > 0;
+  $('#shared-empty').textContent = 'まだありません。相手があなたを公開相手に追加し、写真を公開すると、ここに表示されます。';
+  list.replaceChildren(...share.received.map(it => {
+    const b = el('button', { type: 'button', class: 'gal-item', 'aria-label': `${it.ownerNickname}さん ${fmtDate(it.createdAt)} ${it.summary || ''}` },
+      el('img', { src: 'data:image/jpeg;base64,' + it.thumb, alt: '' }),
+      el('span', { class: 'gal-cap' }, el('strong', {}, it.ownerNickname + 'さん'), el('small', {}, fmtDate(it.createdAt) + ' ' + (it.hairLabel || ''))));
+    b.addEventListener('click', () => openSharedLook(it.lookId));
+    return b;
+  }));
+}
+
+async function openSharedLook(id) {
+  const r = await run(() => api('getSharedLook', { lookId: id }), '写真を読み込んでいます…');
+  if (!r) return;
+  const lk = r.look;
+  $('#look-title').textContent = lk.mine ? 'あなたのヘア＆メイク' : `${lk.ownerNickname}さんのヘア＆メイク`;
+  $('#look-meta').textContent = fmtDate(lk.createdAt) + (lk.hairLabel ? `　髪型：${lk.hairLabel}` : '');
+  $('#look-img').src = `data:${lk.mimeType};base64,${lk.image}`;
+  $('#look-img').alt = $('#look-title').textContent;
+  $('#look-summary').textContent = lk.summary || '';
+  $('#look-dlg').showModal();
+}
+
+/* =========================================================
+ * 7. 動画
  * ========================================================= */
 const videos = { available: false, topics: [], active: 'all', selected: null, kind: 'long' };
 const KIND_FIELD = { long: 'videos', short: 'shorts' };
@@ -1647,15 +1979,27 @@ async function freeVideoSearch() {
 /* =========================================================
  * 音声ナレーション（TTS）
  * ========================================================= */
-/** 読み上げ前のクリーニング：メタ指示・前置き・記号・絵文字を除く */
+/**
+ * 読み上げ前のクリーニング
+ * 「〜で読み上げてください」「明るい声で：」などの演出指示・前置き・ラベル・記号・絵文字を除き、本文だけを残す
+ * （サーバー側 cleanNarration_ と同じ処理）
+ */
 function cleanNarration(t) {
   let s = String(t || '');
   s = s.replace(/```[\s\S]*?```/g, ' ');
   s = s.replace(/[*#_`>~|]/g, '');
-  s = s.replace(/[（(【\[〈《][^）)】\]〉》]{0,30}(読み|声|トーン|口調|ゆっくり|明るく|優しく|やさしく|BGM|SE|効果音|ナレーション|間を)[^）)】\]〉》]{0,30}[）)】\]〉》]/g, '');
-  s = s.replace(/^\s*(ナレーション|ナレーター|解説|原稿|本文|読み上げ文|AI)\s*[:：]\s*/gm, '');
-  const meta = /(読み上げ(て|ます|る|を)|ナレーション(を|です|します|開始|原稿)|AIによる(解説|ナレーション|分析結果をお伝え)|以下(は|が|の).{0,15}(解説|ナレーション|原稿|文章|読み上げ)|音声(で|にて)(お届け|解説|お伝え)|(トーン|口調|声)で(話|読|お届け)|それでは.{0,8}(始め|読み))/;
-  s = s.split(/(?<=[。！？!?\n])/).filter(x => !meta.test(x)).join('');
+  s = s.replace(/[（(【\[〈《][^）)】\]〉》]{0,30}(読み|読ん|声|トーン|口調|調子|ゆっくり|明るく|優しく|やさしく|落ち着|BGM|SE|効果音|ナレーション|間を|朗読)[^）)】\]〉》]{0,30}[）)】\]〉》]/g, '');
+  s = s.replace(/^\s*(please\s+)?(say|read|speak|narrate)\b[^:\n]{0,80}:\s*/gim, '');
+  s = s.replace(/^\s*(ナレーション|ナレーター|解説|原稿|本文|読み上げ文|セリフ|台本|AI|話者\d*|Speaker\s*\d*)\s*[:：]\s*/gim, '');
+  const lead = /^\s*[^。！？!?\n]{0,60}?(読み上げ|読みあげ|朗読|ナレーション|読んで|読む|話して|お話しして|お読み)[^。！？!?\n]{0,12}?(ください|下さい|します|しましょう|お願いします)[。：:、！!\s]*/;
+  const intro = /^\s*(以下|次)(は|が|の)[^。！？!?\n]{0,30}?(解説|ナレーション|原稿|文章|文|テキスト|内容)[^。！？!?\n]{0,20}?[。：:\n]\s*/;
+  for (let i = 0; i < 3; i++) {
+    const before = s;
+    s = s.split('\n').map(line => line.replace(lead, '').replace(intro, '')).join('\n');
+    if (s === before) break;
+  }
+  const meta = /(読み上げ(て|ます|る|を)|ナレーション(を|です|します|開始|原稿)|AIによる(解説|ナレーション|分析結果をお伝え)|音声(で|にて)(お届け|解説|お伝え)|(トーン|口調|声)で(話|読|お届け)|それでは.{0,8}(始め|読み))/;
+  s = s.split(/(?<=[。！？!?\n])/).filter(x => !(meta.test(x) && x.trim().length <= 40)).join('');
   s = s.replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}]/gu, '');
   return s.replace(/\s+/g, ' ').trim();
 }
@@ -1741,8 +2085,10 @@ function stopNarration() {
 
 /* =========================================================
  * 音声入力（STT）
- * 言葉の間が少し空いても切らずに聞き続け、
- * 無音が SILENCE_MS 続いたときだけ確定する
+ *  ・言葉の間が空いても切らずに聞き続ける（ブラウザが途中で止めても自動で再開）
+ *  ・再開のときに、確定前の言葉が消えないよう引き継ぐ
+ *  ・Androidで同じ言葉が重複して返る現象を取り除く
+ *  ・無音が SILENCE_MS 続いたとき、またはマイクをもう一度押したときに確定
  * ========================================================= */
 class VoiceListener {
   constructor({ onInterim, onFinal, onState }) {
@@ -1759,15 +2105,39 @@ class VoiceListener {
   start() {
     if (!this.SR) { toast('この端末は音声入力に対応していません（Chrome・Safariをお使いください）。', 'error'); return; }
     stopNarration();
+    [requestVoice, voiceCmd, instructVoice].forEach(v => { if (v && v !== this) v.cancel(); });
     this.active = true;
-    this.finalText = '';
+    this.committed = '';   // 前の認識セッションまでに確定した言葉
+    this.session = '';     // いまのセッションの言葉（確定＋途中）
     this.latest = '';
     this.spoken = false;
+    this.restarts = 0;
     this.startedAt = Date.now();
     this.lastHeard = Date.now();
     this.spawn();
     this.timer = setInterval(() => this.check(), 250);
     this.onState(true);
+  }
+
+  static join(a, b) {
+    if (!a) return b;
+    if (!b) return a;
+    // 日本語はスペースなしでつなぐ。英数字どうしの境目だけ空ける
+    return /[A-Za-z0-9]$/.test(a) && /^[A-Za-z0-9]/.test(b) ? a + ' ' + b : a + b;
+  }
+
+  /** results から重複を除いた文字列を作る（Androidは前の結果を含んだ形で返すことがある） */
+  static collect(results) {
+    const parts = [];
+    for (let i = 0; i < results.length; i++) {
+      const t = (results[i][0]?.transcript || '').trim();
+      if (!t) continue;
+      const prev = parts[parts.length - 1];
+      if (prev && t.startsWith(prev)) parts[parts.length - 1] = t;   // 前の結果を含む → 置き換え
+      else if (prev && prev.startsWith(t)) continue;                  // 前の結果の一部 → 無視
+      else parts.push(t);
+    }
+    return parts.reduce((a, b) => VoiceListener.join(a, b), '');
   }
 
   spawn() {
@@ -1776,28 +2146,36 @@ class VoiceListener {
     r.continuous = true;
     r.interimResults = true;
     r.maxAlternatives = 1;
+    this.session = '';
     r.onresult = e => {
-      let interim = '';
-      for (let i = e.resultIndex; i < e.results.length; i++) {
-        const t = e.results[i][0].transcript;
-        if (e.results[i].isFinal) this.finalText += t;
-        else interim += t;
-      }
-      this.latest = (this.finalText + interim).trim();
+      this.session = VoiceListener.collect(e.results);
+      this.latest = VoiceListener.join(this.committed, this.session).trim();
       this.spoken = this.spoken || this.latest.length > 0;
       this.lastHeard = Date.now();
       this.onInterim(this.latest);
     };
+    // 声や音が聞こえている間は「無音」と数えない
+    r.onspeechstart = r.onsoundstart = () => { this.lastHeard = Date.now(); };
     r.onerror = e => {
       if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
         toast('マイクの使用が許可されていません。ブラウザの設定を確認してください。', 'error');
         this.cancel();
+      } else if (e.error === 'audio-capture') {
+        toast('マイクが見つかりません。', 'error');
+        this.cancel();
       }
+      // no-speech / network / aborted などは onend で再開する
     };
-    // ブラウザが途中で認識を終了しても、まだ聞き取り中なら自動で再開する
+    // ブラウザが途中で認識を終えても、まだ聞き取り中なら言葉を引き継いで再開する
     r.onend = () => {
+      this.committed = VoiceListener.join(this.committed, this.session).trim();
+      this.session = '';
       if (!this.active) return;
-      try { this.spawn(); } catch (err) { this.finish(); }
+      if (++this.restarts > 60) return this.finish();
+      setTimeout(() => {
+        if (!this.active) return;
+        try { this.spawn(); } catch (err) { this.finish(); }
+      }, 150);
     };
     this.rec = r;
     r.start();
@@ -1819,8 +2197,9 @@ class VoiceListener {
 
   finish() {
     if (!this.active) return;
+    const text = VoiceListener.join(this.committed, this.session).trim() || this.latest;
     this.stopRec();
-    if (this.latest) this.onFinal(this.latest);
+    if (text) this.onFinal(text);
   }
 
   cancel() { if (this.active) this.stopRec(); }
@@ -1836,7 +2215,7 @@ const requestVoice = new VoiceListener({
   },
   onState: on => {
     $('#request-mic').setAttribute('aria-pressed', String(on));
-    $('#request-live').textContent = on ? 'どうぞ、お話しください。' : '';
+    $('#request-live').textContent = on ? 'どうぞ、お話しください（話し終えたら、もう一度マイクを押すとすぐ確定します）。' : '';
   },
 });
 
@@ -1847,7 +2226,7 @@ const voiceCmd = new VoiceListener({
   onState: on => {
     $('#voice-cmd').setAttribute('aria-pressed', String(on));
     const s = $('#voice-status');
-    if (on) { s.hidden = false; s.textContent = 'どうぞ、お話しください。'; }
+    if (on) { s.hidden = false; s.textContent = 'どうぞ、お話しください。（もう一度押すと確定）'; }
     else setTimeout(() => { if (!voiceCmd.active) s.hidden = true; }, 2500);
   },
 });
@@ -1883,6 +2262,8 @@ function handleCommand(text) {
     .sort((a, b) => b.dataset.label.length - a.dataset.label.length);
   const hit = styles.find(b => t.includes(b.dataset.label));
   if (hit) { hit.click(); go('step-hair'); return tryHair(); }
+  if (/見せてもら|届いた|もらった/.test(t)) { loadSharedWithMe(); return go('step-shared'); }
+  if (/共有|公開|ライン|LINE/i.test(t)) return go('step-share');
   if (/ギャラリー|見比べ|比較/.test(t)) return go('step-gallery');
   if (/セット|仕上が|完成/.test(t)) return go('step-set');
   if (/鼻|あご|顎|小顔|明る|ナチュラル|華やか|ぱっちり|シミ|ファンデ|くすみ/.test(t)) {
@@ -1955,6 +2336,13 @@ function bindMain() {
 
   $('#voice-cmd').addEventListener('click', () => voiceCmd.toggle());
 
+  $('#member-form').addEventListener('submit', addMember);
+  $('#invite-line').addEventListener('click', inviteByLine);
+  $('#share-reload').addEventListener('click', async () => { await loadMembers(); await loadGallery(true); renderShareList(); });
+  $('#share-all-private').addEventListener('click', setAllPrivate);
+  $('#shared-reload').addEventListener('click', loadSharedWithMe);
+  $('#look-dlg').addEventListener('close', () => { $('#look-img').removeAttribute('src'); });
+
   // ページを離れるときはカメラ・音声を止める
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) { stopCamera(); requestVoice.cancel(); voiceCmd.cancel(); instructVoice.cancel(); }
@@ -1967,6 +2355,7 @@ function init() {
   try {
     if (!C) throw new Error('config.js が読み込まれていません。');
     applyConfig();
+    capturePendingLook();
     setupEarthStudio();
     setupPasswordToggles();
     bindAuth();

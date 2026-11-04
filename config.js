@@ -1,20 +1,37 @@
 /**
- * かがみAI 設定ファイル
- * GASのURLや演出用動画は、このファイルだけ書き換えれば切り替えられます。
+ * かがみAI 設定ファイル（フロント）
+ * GASのURL・バージョン・共有リンクの文言・音声入力の待ち時間などは、
+ * このファイルだけ書き換えれば切り替えられます。
+ * ※バックエンド側の設定は gas/Config.gs にあります。
  */
 window.CONFIG = {
   APP_NAME: 'かがみAI',
   APP_SUBTITLE: 'ヘア＆メイク試着室',
-  VERSION: 'v1.4.0',
+  VERSION: 'v1.5.0',   // gas/Config.gs の APP_VERSION と合わせる（違うと画面に注意が出ます）
 
   // GASウェブアプリのURL（デプロイ後に表示される …/exec のURL）
+  // ※本番とテストを切り替えるときは、ここを書き換えるだけでOK
   GAS_ENDPOINT: 'https://script.google.com/macros/s/AKfycbybkQgdG4a9qMdUOg3421jSmaAvYSN5zJ6dzBVybL86WwK6aiCNweBRnB7AH-HaO8Xa/exec',
 
   // 解説の読み上げ: 'gemini'（Gemini TTS、失敗時はブラウザ音声） / 'browser'（ブラウザ音声のみ）
   TTS_MODE: 'gemini',
 
-  // 音声入力：言葉の間が SILENCE_MS 空いたら確定。話し始める前は INITIAL_WAIT_MS 待つ
-  STT: { LANG: 'ja-JP', SILENCE_MS: 2500, INITIAL_WAIT_MS: 8000, MAX_MS: 60000 },
+  // 音声入力
+  //   SILENCE_MS      … 話し終えてから、この時間だまっていたら確定（言葉の間が空いても切れないよう長め）
+  //   INITIAL_WAIT_MS … 話し始めるまで待つ時間
+  //   MAX_MS          … 1回の音声入力の最大時間
+  //   ※マイクボタンをもう一度押すと、すぐに確定できます
+  STT: { LANG: 'ja-JP', SILENCE_MS: 4500, INITIAL_WAIT_MS: 12000, MAX_MS: 120000 },
+
+  // 家族・友人への共有
+  SHARE: {
+    // 共有リンクの行き先（公開URL）。空ならいま開いているページのURLを使う
+    APP_URL: 'https://kenken6291.github.io/kagami-ai/',
+    // LINEなどで写真を送るときの文
+    LOOK_MESSAGE: '{name}さんから「{app}」のヘア＆メイクが届きました。ログインすると見られます。',
+    // まだ会員でない相手に、登録を案内するときの文
+    INVITE_MESSAGE: '{name}さんから「{app}」への招待です。会員登録すると、{name}さんのヘア＆メイクを見られるようになります。',
+  },
 
   // 送信前に縮小する写真の長辺（px）と画質
   IMAGE: { MAX_SIZE: 1024, QUALITY: 0.9 },

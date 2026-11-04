@@ -1,6 +1,10 @@
 /**
  * かがみAI ～ヘア＆メイク試着室  バックエンド（Google Apps Script）
- * v1.4.0
+ * v1.5.0
+ *
+ * ■ ファイル構成（GASエディタ）
+ *   Config.gs … バージョン・各種上限・既定値（設定はここだけ書き換え）
+ *   Code.gs   … 本体（このファイル）
  *
  * ■ スクリプトプロパティ（プロジェクトの設定 → スクリプト プロパティ）
  *   必須  GEMINI_API_KEY        … Gemini APIキー
@@ -10,24 +14,20 @@
  *   任意  GEMINI_IMAGE_MODEL … カンマ区切りで複数可（例: gemini-3.1-flash-image,gemini-2.5-flash-image）
  *         ※画像生成は無料枠では使えない場合があります（Google AI Studio で課金設定が必要）
  *   任意  DAILY_AI_LIMIT（既定40） / IMAGE_RETENTION_DAYS（既定7） / MAX_LOOKS（ギャラリー上限、既定30）
+ *         ※既定値は Config.gs の DEFAULTS。プロパティに書けばそちらが優先
  *   自動  SPREADSHEET_ID / DRIVE_FOLDER_ID / PEPPER … setup() 実行時に自動作成
  *
  * ■ 初回だけ setup() を実行 → ウェブアプリとしてデプロイ（実行ユーザー: 自分 / アクセス: 全員）
  * ■ コードを変更したら「デプロイを管理 → 編集 → 新バージョン」で再デプロイが必要です
  */
 
-const APP_VERSION = 'v1.4.0';
-const TERMS_VERSION = '2026-10-27';
-const SESSION_TTL = 21600;      // 6時間（CacheServiceの上限）
-const MAX_FAILS = 5;            // ログイン失敗の上限
-const LOCK_MINUTES = 15;        // ロック時間
-const HASH_ROUNDS = 300;        // パスワードハッシュの反復回数
+// APP_VERSION / TERMS_VERSION / SESSION_TTL / MAX_FAILS / LOCK_MINUTES / HASH_ROUNDS / SHARE / DEFAULTS は Config.gs にあります
 
 const SHEETS = {
   USERS: {
     name: 'Users',
     headers: ['userId', 'email', 'nickname', 'passwordHash', 'salt', 'mustChange', 'failCount',
-      'lockedUntil', 'status', 'termsVersion', 'agreedAt', 'createdAt', 'lastLoginAt'],
+      'lockedUntil', 'status', 'termsVersion', 'agreedAt', 'createdAt', 'lastLoginAt', 'agreementsJson'],
   },
   HISTORY: {
     name: 'History',
@@ -36,25 +36,19 @@ const SHEETS = {
   },
   LOOKS: {
     name: 'Looks',
-    headers: ['lookId', 'userId', 'createdAt', 'fileId', 'thumb', 'hairLabel', 'summary', 'metaJson'],
+    // shared: TRUE＝公開中（既定は非公開）／ audience: 見せる相手のuserId配列（空＝公開相手の全員）
+    headers: ['lookId', 'userId', 'createdAt', 'fileId', 'thumb', 'hairLabel', 'summary', 'metaJson',
+      'shared', 'audience', 'sharedAt'],
+  },
+  MEMBERS: {
+    // 公開相手（ownerId が memberId に見せてよい、という登録）
+    name: 'Members',
+    headers: ['ownerId', 'memberId', 'label', 'active', 'addedAt'],
   },
   LOGS: {
     name: 'Logs',
     headers: ['at', 'userId', 'action', 'detail'],
   },
-};
-
-const DEFAULTS = {
-  APP_NAME: 'かがみAI',
-  APP_URL: 'https://kenken6291.github.io/kagami-ai/',
-  GEMINI_TEXT_MODEL: 'gemini-2.5-flash',
-  // カンマ区切りで複数指定すると、失敗時に順番に試す
-  GEMINI_IMAGE_MODEL: 'gemini-3.1-flash-image,gemini-2.5-flash-image,gemini-3.1-flash-lite-image',
-  GEMINI_TTS_MODEL: 'gemini-2.5-flash-preview-tts',
-  TTS_VOICE: 'Kore',
-  DAILY_AI_LIMIT: '40',
-  IMAGE_RETENTION_DAYS: '7',
-  MAX_LOOKS: '30',
 };
 
 /* =========================================================
@@ -122,7 +116,7 @@ function testGemini() {
  * エントリーポイント
  * ========================================================= */
 function doGet() {
-  return json_({ ok: true, app: prop_('APP_NAME'), version: APP_VERSION });
+  return json_({ ok: true, app: prop_('APP_NAME'), version: APP_VERSION, terms: TERMS_VERSION });
 }
 
 function doPost(e) {
@@ -157,6 +151,15 @@ const ROUTES = {
   listLooks: listLooks_,
   getLooks: getLooks_,
   deleteLook: deleteLook_,
+  // 共有（v1.5.0〜）
+  listMembers: listMembers_,
+  addMember: addMember_,
+  updateMember: updateMember_,
+  removeMember: removeMember_,
+  setLookShare: setLookShare_,
+  setAllPrivate: setAllPrivate_,
+  sharedWithMe: sharedWithMe_,
+  getSharedLook: getSharedLook_,
 };
 
 function json_(obj) {
@@ -173,8 +176,9 @@ function register_(req) {
   if (!nickname || nickname.length > 20) throw new Error('ニックネームは1〜20文字で入力してください。');
 
   const a = req.agreements || {};
-  if (!(a.terms === true && a.disclaimer === true && a.selfResponsibility === true && a.dispute === true)) {
-    throw new Error('すべての同意項目にチェックが必要です。');
+  const AGREE_KEYS = ['cautions', 'terms', 'disclaimer', 'selfResponsibility', 'dispute'];
+  if (!AGREE_KEYS.every(function (k) { return a[k] === true; })) {
+    throw new Error('注意書き・利用規約・免責事項・自己責任・当事者間での問題解決のすべてにチェックが必要です。');
   }
 
   const lock = LockService.getScriptLock();
@@ -200,6 +204,7 @@ function register_(req) {
       agreedAt: now,
       createdAt: now,
       lastLoginAt: '',
+      agreementsJson: JSON.stringify({ version: TERMS_VERSION, items: AGREE_KEYS, at: now.toISOString() }),
     };
     // メール送信に失敗した場合は登録しない
     sendTempPasswordMail_(email, nickname, temp, false);
@@ -238,7 +243,7 @@ function login_(req) {
   updateUser_(f.row, { failCount: 0, lockedUntil: '', lastLoginAt: new Date() });
   const mustChange = isTrue_(u.mustChange);
   const token = createSession_(u, mustChange);
-  return { token: token, user: { nickname: u.nickname, email: u.email }, mustChange: mustChange };
+  return { token: token, user: { userId: u.userId, nickname: u.nickname, email: u.email }, mustChange: mustChange };
 }
 
 function logout_(req) {
@@ -248,7 +253,7 @@ function logout_(req) {
 
 function me_(req) {
   const s = requireSession_(req.token);
-  return { user: { nickname: s.nickname, email: s.email }, mustChange: !!s.mustChange };
+  return { user: { userId: s.userId, nickname: s.nickname, email: s.email }, mustChange: !!s.mustChange };
 }
 
 function changePassword_(req) {
@@ -396,7 +401,7 @@ const ANALYZE_PROMPT = [
   '- hairSuggestions は3件、videoQueries は3件（メイク方法2件・ヘアセット術1件を目安）。',
   '- 断定を避け「〜が似合いやすい傾向です」のようにやわらかく表現する。',
   '- 人種・年齢・体型・健康状態については触れない。性別を決めつけない。',
-  '- narration には「読み上げます」「AIによる解説です」「以下は」などの前置きやメタ表現、記号、絵文字を入れず、そのまま声に出せる解説本文だけを書く。',
+  '- narration には「読み上げます」「〜で読み上げてください」「〜な声で」「AIによる解説です」「以下は」などの前置き・演出指示・メタ表現、括弧書き、記号、絵文字を一切入れず、最初の一文から解説の中身で始まる、そのまま声に出せる本文だけを書く。',
   '- 写真に顔がはっきり写っていない場合は {"error": "顔がはっきり写った正面の写真でお試しください。"} だけを返す。',
   '',
   'ユーザーの要望: {REQUEST}',
@@ -776,11 +781,13 @@ function saveLook_(req) {
   const lookId = 'L' + now.getTime().toString(36) + Utilities.getUuid().slice(0, 4);
   const hairLabel = sanitizeText_(meta.hair, 60);
   const summary = sanitizeText_(meta.summary, 300);
-  sh.appendRow([lookId, s.userId, now, fileId, thumb, safe_(hairLabel), safe_(summary), JSON.stringify(meta).slice(0, 5000)]);
+  // 公開設定は必ず「非公開」で保存する
+  sh.appendRow([lookId, s.userId, now, fileId, thumb, safe_(hairLabel), safe_(summary), JSON.stringify(meta).slice(0, 5000),
+    false, '[]', '']);
   log_(s.userId, 'saveLook', lookId);
   return {
     message: 'ギャラリーに保存しました。',
-    look: { lookId: lookId, createdAt: now.toISOString(), thumb: thumb, hairLabel: hairLabel, summary: summary },
+    look: { lookId: lookId, createdAt: now.toISOString(), thumb: thumb, hairLabel: hairLabel, summary: summary, shared: false, audience: [] },
   };
 }
 
@@ -798,6 +805,8 @@ function listLooks_(req) {
       thumb: String(o.thumb),
       hairLabel: String(o.hairLabel || ''),
       summary: String(o.summary || ''),
+      shared: isTrue_(o.shared),
+      audience: parseIds_(o.audience),
     });
   }
   return { items: items };
@@ -834,6 +843,243 @@ function deleteLook_(req) {
     }
   }
   throw new Error('写真が見つかりませんでした。');
+}
+
+/* =========================================================
+ * 共有（家族・友人など、指定した会員にだけ公開）
+ *   ・公開相手は、登録済み会員のメールアドレスで追加
+ *   ・写真ごとに「公開／非公開」（既定は非公開）と見せる相手を選べる
+ *   ・相手を「一時停止」「削除」すれば、すぐ見られなくなる
+ * ========================================================= */
+function parseIds_(v) {
+  try {
+    const a = JSON.parse(String(v || '[]'));
+    return Array.isArray(a) ? a.map(String) : [];
+  } catch (e) { return []; }
+}
+
+/** userId → ニックネーム の対応表 */
+function nicknameMap_() {
+  const data = sheet_('USERS').getDataRange().getValues();
+  const h = data[0];
+  const ci = h.indexOf('userId');
+  const cn = h.indexOf('nickname');
+  const cs = h.indexOf('status');
+  const map = {};
+  for (let r = 1; r < data.length; r++) {
+    map[String(data[r][ci])] = { nickname: String(data[r][cn] || ''), active: String(data[r][cs]) === 'active' };
+  }
+  return map;
+}
+
+function membersOf_(ownerId) {
+  const data = sheet_('MEMBERS').getDataRange().getValues();
+  const out = [];
+  for (let r = 1; r < data.length; r++) {
+    if (String(data[r][0]) !== ownerId) continue;
+    out.push({ row: r + 1, memberId: String(data[r][1]), label: String(data[r][2] || ''), active: isTrue_(data[r][3]), addedAt: data[r][4] });
+  }
+  return out;
+}
+
+function listMembers_(req) {
+  const s = requireActive_(req.token);
+  const names = nicknameMap_();
+  const items = membersOf_(s.userId).map(function (m) {
+    const u = names[m.memberId] || { nickname: '（退会した会員）', active: false };
+    return {
+      memberId: m.memberId,
+      label: m.label,
+      nickname: u.nickname,
+      active: m.active,
+      available: u.active,
+      addedAt: m.addedAt instanceof Date ? m.addedAt.toISOString() : String(m.addedAt || ''),
+    };
+  });
+  return { items: items, max: SHARE.MAX_MEMBERS };
+}
+
+function addMember_(req) {
+  const s = requireActive_(req.token);
+  const email = normEmail_(req.email);
+  const label = sanitizeText_(req.label, SHARE.LABEL_MAX);
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('メールアドレスの形式が正しくありません。');
+
+  // 総当たりで会員のメールアドレスを調べられないよう、回数を制限
+  const cache = CacheService.getScriptCache();
+  const ck = 'am_' + s.userId;
+  const n = Number(cache.get(ck) || 0);
+  if (n >= SHARE.ADD_LIMIT_PER_HOUR) throw new Error('公開相手の追加は1時間に' + SHARE.ADD_LIMIT_PER_HOUR + '回までです。しばらく待ってからお試しください。');
+  cache.put(ck, String(n + 1), 3600);
+
+  if (email === normEmail_(s.email)) throw new Error('ご自身は公開相手に追加できません。');
+  const f = findUser_('email', email);
+  if (!f || f.obj.status !== 'active') {
+    throw new Error('このメールアドレスの会員が見つかりません。相手に、先に会員登録をしてもらってください（「登録を案内する」からLINEで案内できます）。');
+  }
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    const list = membersOf_(s.userId);
+    if (list.some(function (m) { return m.memberId === f.obj.userId; })) throw new Error('この方は、すでに公開相手に入っています。');
+    if (list.length >= SHARE.MAX_MEMBERS) throw new Error('公開相手は' + SHARE.MAX_MEMBERS + '人までです。');
+    sheet_('MEMBERS').appendRow([s.userId, f.obj.userId, safe_(label), true, new Date()]);
+  } finally {
+    lock.releaseLock();
+  }
+  log_(s.userId, 'addMember', f.obj.userId);
+  return {
+    message: (label || f.obj.nickname) + 'さんを公開相手に追加しました。',
+    member: { memberId: f.obj.userId, label: label, nickname: String(f.obj.nickname), active: true, available: true, addedAt: new Date().toISOString() },
+  };
+}
+
+function updateMember_(req) {
+  const s = requireActive_(req.token);
+  const id = String(req.memberId || '');
+  const m = membersOf_(s.userId).filter(function (x) { return x.memberId === id; })[0];
+  if (!m) throw new Error('公開相手が見つかりませんでした。');
+  const sh = sheet_('MEMBERS');
+  if (typeof req.active === 'boolean') sh.getRange(m.row, 4).setValue(req.active);
+  if (typeof req.label === 'string') sh.getRange(m.row, 3).setValue(safe_(sanitizeText_(req.label, SHARE.LABEL_MAX)));
+  log_(s.userId, 'updateMember', id + (typeof req.active === 'boolean' ? (req.active ? ' on' : ' off') : ''));
+  return { message: '変更しました。' };
+}
+
+function removeMember_(req) {
+  const s = requireActive_(req.token);
+  const id = String(req.memberId || '');
+  const m = membersOf_(s.userId).filter(function (x) { return x.memberId === id; })[0];
+  if (!m) throw new Error('公開相手が見つかりませんでした。');
+  sheet_('MEMBERS').deleteRow(m.row);
+  // 写真ごとの「見せる相手」からも外す
+  const sh = sheet_('LOOKS');
+  const data = sh.getDataRange().getValues();
+  const h = data[0];
+  const ca = h.indexOf('audience');
+  for (let r = 1; r < data.length; r++) {
+    if (data[r][1] !== s.userId) continue;
+    const ids = parseIds_(data[r][ca]);
+    if (ids.indexOf(id) >= 0) sh.getRange(r + 1, ca + 1).setValue(JSON.stringify(ids.filter(function (x) { return x !== id; })));
+  }
+  log_(s.userId, 'removeMember', id);
+  return { message: '公開相手から外しました。この方はもう写真を見られません。' };
+}
+
+function setLookShare_(req) {
+  const s = requireActive_(req.token);
+  const id = String(req.lookId || '');
+  const shared = req.shared === true;
+  const mine = membersOf_(s.userId).map(function (m) { return m.memberId; });
+  let audience = (Array.isArray(req.audience) ? req.audience : []).map(String).filter(function (x) { return mine.indexOf(x) >= 0; });
+  if (shared && !mine.length) throw new Error('先に「公開相手」を追加してください。');
+
+  const sh = sheet_('LOOKS');
+  const data = sh.getDataRange().getValues();
+  const h = data[0];
+  for (let r = 1; r < data.length; r++) {
+    if (String(data[r][0]) !== id || data[r][1] !== s.userId) continue;
+    const row = r + 1;
+    sh.getRange(row, h.indexOf('shared') + 1).setValue(shared);
+    sh.getRange(row, h.indexOf('audience') + 1).setValue(JSON.stringify(audience));
+    sh.getRange(row, h.indexOf('sharedAt') + 1).setValue(shared ? new Date() : '');
+    log_(s.userId, 'setLookShare', id + ' ' + (shared ? 'on' : 'off'));
+    return { message: shared ? '公開しました。' : '非公開にしました。', shared: shared, audience: audience };
+  }
+  throw new Error('写真が見つかりませんでした。');
+}
+
+function setAllPrivate_(req) {
+  const s = requireActive_(req.token);
+  const sh = sheet_('LOOKS');
+  const data = sh.getDataRange().getValues();
+  const c = data[0].indexOf('shared') + 1;
+  let n = 0;
+  for (let r = 1; r < data.length; r++) {
+    if (data[r][1] === s.userId && isTrue_(data[r][c - 1])) { sh.getRange(r + 1, c).setValue(false); n++; }
+  }
+  log_(s.userId, 'setAllPrivate', String(n));
+  return { message: n ? n + '枚を非公開にしました。' : '公開中の写真はありませんでした。' };
+}
+
+/** 閲覧者 viewerId が、この写真を見てよいか */
+function canView_(look, viewerId, ownerMembers) {
+  if (look.userId === viewerId) return true;
+  if (!isTrue_(look.shared)) return false;
+  const m = ownerMembers.filter(function (x) { return x.memberId === viewerId; })[0];
+  if (!m || !m.active) return false;
+  const aud = parseIds_(look.audience);
+  return aud.length === 0 || aud.indexOf(viewerId) >= 0;
+}
+
+function sharedWithMe_(req) {
+  const s = requireActive_(req.token);
+  // 自分を公開相手にしている人（有効なものだけ）
+  const mdata = sheet_('MEMBERS').getDataRange().getValues();
+  const owners = {};
+  for (let r = 1; r < mdata.length; r++) {
+    if (String(mdata[r][1]) === s.userId && isTrue_(mdata[r][3])) owners[String(mdata[r][0])] = true;
+  }
+  if (!Object.keys(owners).length) return { items: [] };
+  const names = nicknameMap_();
+  const data = sheet_('LOOKS').getDataRange().getValues();
+  const h = data[0];
+  const items = [];
+  for (let r = data.length - 1; r >= 1; r--) {
+    const o = rowToObj_(h, data[r]);
+    if (!owners[o.userId] || !isTrue_(o.shared)) continue;
+    if (!names[o.userId] || !names[o.userId].active) continue;
+    const aud = parseIds_(o.audience);
+    if (aud.length && aud.indexOf(s.userId) < 0) continue;
+    items.push({
+      lookId: o.lookId,
+      ownerNickname: names[o.userId].nickname,
+      createdAt: o.createdAt instanceof Date ? o.createdAt.toISOString() : String(o.createdAt),
+      sharedAt: o.sharedAt instanceof Date ? o.sharedAt.toISOString() : String(o.sharedAt || ''),
+      thumb: String(o.thumb),
+      hairLabel: String(o.hairLabel || ''),
+      summary: String(o.summary || ''),
+    });
+    if (items.length >= 100) break;
+  }
+  return { items: items };
+}
+
+function getSharedLook_(req) {
+  const s = requireActive_(req.token);
+  const id = String(req.lookId || '');
+  const data = sheet_('LOOKS').getDataRange().getValues();
+  const h = data[0];
+  for (let r = 1; r < data.length; r++) {
+    if (String(data[r][0]) !== id) continue;
+    const o = rowToObj_(h, data[r]);
+    const names = nicknameMap_();
+    const owner = names[o.userId];
+    if (!owner || !owner.active || !canView_(o, s.userId, membersOf_(o.userId))) break;
+    let image, mimeType = 'image/jpeg';
+    try {
+      const blob = DriveApp.getFileById(String(o.fileId)).getBlob();
+      image = Utilities.base64Encode(blob.getBytes());
+      mimeType = blob.getContentType() || mimeType;
+    } catch (e) {
+      image = String(o.thumb);
+    }
+    log_(s.userId, 'viewSharedLook', id);
+    return {
+      look: {
+        lookId: id,
+        mine: o.userId === s.userId,
+        ownerNickname: owner.nickname,
+        createdAt: o.createdAt instanceof Date ? o.createdAt.toISOString() : String(o.createdAt),
+        hairLabel: String(o.hairLabel || ''),
+        summary: String(o.summary || ''),
+        mimeType: mimeType,
+        image: image,
+      },
+    };
+  }
+  // 存在しない場合と権限がない場合は同じ返事にする
+  throw new Error('この写真は見られません。非公開になったか、公開相手に入っていない可能性があります。');
 }
 
 /* ---------- Gemini ---------- */
@@ -884,17 +1130,32 @@ function findInline_(res, prefix) {
   return p ? p.inlineData : null;
 }
 
-/** 読み上げ用テキストのクリーニング（メタ指示・前置き・記号を除去） */
+/**
+ * 読み上げ用テキストのクリーニング
+ * 「〜で読み上げてください」「明るい声で：」などの演出指示・前置き・ラベル・記号を除き、
+ * 本文だけを残す（本文そのものは消さない）
+ */
 function cleanNarration_(t) {
   let s = String(t || '');
   s = s.replace(/```[\s\S]*?```/g, ' ');
   s = s.replace(/[*#_`>~|]/g, '');
   // （明るいトーンで）【BGM】などの演出指示
-  s = s.replace(/[（(【\[〈《][^）)】\]〉》]{0,30}(読み|声|トーン|口調|ゆっくり|明るく|優しく|やさしく|BGM|SE|効果音|ナレーション|間を)[^）)】\]〉》]{0,30}[）)】\]〉》]/g, '');
+  s = s.replace(/[（(【\[〈《][^）)】\]〉》]{0,30}(読み|読ん|声|トーン|口調|調子|ゆっくり|明るく|優しく|やさしく|落ち着|BGM|SE|効果音|ナレーション|間を|朗読)[^）)】\]〉》]{0,30}[）)】\]〉》]/g, '');
+  // 英語の演出指示（Say cheerfully: など）
+  s = s.replace(/^\s*(please\s+)?(say|read|speak|narrate)\b[^:\n]{0,80}:\s*/gim, '');
   // 「ナレーション：」「解説:」などのラベル
-  s = s.replace(/^\s*(ナレーション|ナレーター|解説|原稿|本文|読み上げ文|AI)\s*[:：]\s*/gm, '');
-  const meta = /(読み上げ(て|ます|る|を)|ナレーション(を|です|します|開始|原稿)|AIによる(解説|ナレーション|分析結果をお伝え)|以下(は|が|の).{0,15}(解説|ナレーション|原稿|文章|読み上げ)|音声(で|にて)(お届け|解説|お伝え)|(トーン|口調|声)で(話|読|お届け)|それでは.{0,8}(始め|読み))/;
-  s = s.split(/(?<=[。！？!?\n])/).filter(function (x) { return !meta.test(x); }).join('');
+  s = s.replace(/^\s*(ナレーション|ナレーター|解説|原稿|本文|読み上げ文|セリフ|台本|AI|話者\d*|Speaker\s*\d*)\s*[:：]\s*/gim, '');
+  // 行頭の指示文「〜で読み上げてください。」「以下の文章を〜読んでください：」
+  const lead = /^\s*[^。！？!?\n]{0,60}?(読み上げ|読みあげ|朗読|ナレーション|読んで|読む|話して|お話しして|お読み)[^。！？!?\n]{0,12}?(ください|下さい|します|しましょう|お願いします)[。：:、！!\s]*/;
+  const intro = /^\s*(以下|次)(は|が|の)[^。！？!?\n]{0,30}?(解説|ナレーション|原稿|文章|文|テキスト|内容)[^。！？!?\n]{0,20}?[。：:\n]\s*/;
+  for (let i = 0; i < 3; i++) {
+    const before = s;
+    s = s.split('\n').map(function (line) { return line.replace(lead, '').replace(intro, ''); }).join('\n');
+    if (s === before) break;
+  }
+  // 文として独立したメタ文（短いものだけ消す。本文は消さない）
+  const meta = /(読み上げ(て|ます|る|を)|ナレーション(を|です|します|開始|原稿)|AIによる(解説|ナレーション|分析結果をお伝え)|音声(で|にて)(お届け|解説|お伝え)|(トーン|口調|声)で(話|読|お届け)|それでは.{0,8}(始め|読み))/;
+  s = s.split(/(?<=[。！？!?\n])/).filter(function (x) { return !(meta.test(x) && x.trim().length <= 40); }).join('');
   s = s.replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}]/gu, '');
   return s.replace(/\s+/g, ' ').trim();
 }
@@ -931,7 +1192,9 @@ function cleanupOldImages() {
 /* =========================================================
  * スプレッドシート・共通
  * ========================================================= */
+const SHEET_CACHE_ = {};
 function sheet_(key) {
+  if (SHEET_CACHE_[key]) return SHEET_CACHE_[key];
   const ss = SpreadsheetApp.openById(prop_('SPREADSHEET_ID'));
   const def = SHEETS[key];
   let sh = ss.getSheetByName(def.name);
@@ -939,8 +1202,21 @@ function sheet_(key) {
     sh = ss.insertSheet(def.name);
     sh.appendRow(def.headers);
     sh.setFrozenRows(1);
+    sh.getRange(1, 1, 1, def.headers.length).setFontWeight('bold');
+  } else {
+    ensureColumns_(sh, def.headers);
   }
+  SHEET_CACHE_[key] = sh;
   return sh;
+}
+/** バージョンアップで増えた列を、既存シートの右端に自動で追加する */
+function ensureColumns_(sh, headers) {
+  const lastCol = Math.max(1, sh.getLastColumn());
+  const cur = sh.getRange(1, 1, 1, lastCol).getValues()[0].map(String);
+  const missing = headers.filter(function (h) { return cur.indexOf(h) < 0; });
+  if (!missing.length) return;
+  const start = cur.filter(function (h) { return h !== ''; }).length + 1;
+  sh.getRange(1, start, 1, missing.length).setValues([missing]).setFontWeight('bold');
 }
 function rowToObj_(headers, row) {
   const o = {};

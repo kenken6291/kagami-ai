@@ -1,4 +1,4 @@
-/* かがみAI style.css v1.0.0 */
+/* かがみAI style.css v1.5.0 */
 :root {
   --paper: #F3F1F5;      /* 薄い藤鼠 */
   --surface: #FFFFFF;
@@ -421,3 +421,78 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--rouge); width:
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }
+
+/* =========================================================
+ * v1.5.0 共有（家族・友人）
+ * ========================================================= */
+:root { --line-green: #06C755; --line-green-ink: #FFFFFF; }
+@media (prefers-color-scheme: dark) { :root { --line-green: #2BD96E; --line-green-ink: #0D2416; } }
+
+.btn-line { background: var(--line-green); border-color: var(--line-green); color: var(--line-green-ink); }
+.btn-line:not(:disabled):hover { filter: brightness(1.06); }
+
+.share-notice {
+  border: 2px solid var(--sage); background: var(--surface); border-radius: var(--radius);
+  padding: 12px 16px; margin: 0 0 16px; line-height: 1.7;
+}
+.server-version { margin-left: .4em; font-size: .85em; }
+.guide-version { font-size: .85rem; margin: 8px 0 0; }
+
+.share-block { margin: 18px 0 8px; }
+.share-block h3 { margin: 0 0 4px; }
+.member-form { display: grid; grid-template-columns: 1fr; gap: 8px; margin: 10px 0 6px; }
+@media (min-width: 640px) { .member-form { grid-template-columns: 2fr 1fr auto; align-items: center; } }
+
+.member-list, .share-list { list-style: none; padding: 0; margin: 8px 0 0; }
+.member-row {
+  display: grid; grid-template-columns: 1fr auto auto; gap: 10px; align-items: center;
+  padding: 10px 0; border-bottom: 1px solid var(--line);
+}
+.member-row.is-off .member-name strong { color: var(--ink-soft); }
+.member-name { display: flex; flex-direction: column; line-height: 1.45; min-width: 0; }
+.member-name small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* スイッチ（公開／非公開・見せる／停止中） */
+.switch { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; min-height: 44px; position: relative; }
+.switch-input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.switch-track {
+  width: 50px; height: 28px; border-radius: 999px; background: var(--line); position: relative; flex: none;
+  transition: background .18s;
+}
+.switch-track::after {
+  content: ""; position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; border-radius: 50%;
+  background: var(--surface); box-shadow: 0 1px 3px var(--shadow); transition: transform .18s;
+}
+.switch-input:checked + .switch-track { background: var(--rouge); }
+.switch-input:checked + .switch-track::after { transform: translateX(22px); }
+.switch-input:focus-visible + .switch-track { outline: 3px solid var(--rouge); outline-offset: 2px; }
+.switch-input:disabled + .switch-track { opacity: .5; }
+.switch-text { font-weight: 700; min-width: 4em; font-size: .95rem; }
+@media (prefers-reduced-motion: reduce) { .switch-track, .switch-track::after { transition: none; } }
+
+.share-row {
+  display: grid; grid-template-columns: 76px 1fr; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--line);
+}
+.share-thumb { width: 76px; aspect-ratio: 3 / 4; object-fit: cover; border-radius: 10px; border: 2px solid var(--silver); }
+.share-row.is-public .share-thumb { border-color: var(--rouge); }
+.share-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; line-height: 1.5; }
+.share-sum { font-size: .88rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.share-ctrl { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; }
+.audience { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 4px; }
+.audience-label { font-size: .85rem; }
+.chip-small { min-height: 36px; padding: 2px 12px; font-size: .88rem; }
+.chip.is-off { opacity: .6; }
+
+.pub-badge {
+  position: absolute; right: 6px; top: 6px; z-index: 1; font-size: .72rem; font-weight: 700; line-height: 1;
+  padding: 5px 7px; border-radius: 999px; background: var(--rouge); color: var(--rouge-ink);
+}
+#invite-line { white-space: normal; text-align: center; line-height: 1.4; }
+
+.dialog-wide { width: min(640px, calc(100vw - 24px)); }
+.look-img { width: 100%; max-height: 64vh; object-fit: contain; border-radius: var(--radius); background: var(--glass); margin: 8px 0; }
+.look-summary { font-size: .95rem; }
+.send-actions { display: grid; gap: 10px; margin: 12px 0; }
+.send-actions .btn { width: 100%; justify-content: center; }
+.send-url { margin-bottom: 14px; font-size: .85rem; }
+.send-actions a.btn-ghost { color: var(--ink); }

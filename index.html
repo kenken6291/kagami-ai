@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Shippori+Mincho+B1:wght@500;700&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css?v=1.5.0">
 </head>
 <body>
   <!-- Google Earth Studio 背景動画 -->
@@ -33,6 +33,8 @@
       <button type="button" id="menu-btn" class="btn btn-ghost btn-small" aria-haspopup="true" aria-expanded="false" aria-controls="menu">メニュー</button>
       <nav id="menu" class="menu" hidden>
         <button type="button" id="menu-guide">使い方</button>
+        <button type="button" id="menu-share">家族・友人と共有</button>
+        <button type="button" id="menu-shared">見せてもらった写真</button>
         <button type="button" id="menu-history">診断の履歴</button>
         <button type="button" id="menu-password">パスワードを変更</button>
         <button type="button" id="menu-delete-images">保存された写真を削除</button>
@@ -47,6 +49,7 @@
 
     <!-- ===== ログイン ===== -->
     <section data-view="login" class="auth" hidden>
+      <p id="share-notice" class="share-notice" hidden>共有された写真を見るには、ログインしてください。まだ会員でない方は、会員登録をしてからこのリンクをもう一度開いてください。</p>
       <h2>ログイン</h2>
       <form id="login-form" class="form" novalidate>
         <label>メールアドレス
@@ -66,6 +69,7 @@
       <p class="auth-links">
         <button type="button" id="to-register" class="link">はじめての方は会員登録</button>
         <button type="button" id="to-forgot" class="link">パスワードを忘れた方</button>
+        <button type="button" class="link js-open-guide">使い方を見る</button>
       </p>
     </section>
 
@@ -82,7 +86,19 @@
         </label>
 
         <fieldset class="agreements">
-          <legend>ご利用前に、次の4つをお読みください</legend>
+          <legend>ご利用前に、次の5つをお読みください</legend>
+
+          <details open>
+            <summary>注意書き（はじめにお読みください）</summary>
+            <div class="terms">
+              <p>写真は、ご本人のもの、または写っている方の同意を得たものだけを使ってください。</p>
+              <p>AIが作る髪型・メイクの画像はイメージです。実際の仕上がりや似合い方を約束するものではありません。</p>
+              <p>写真は分析のためGoogleのAI（Gemini）へ送信され、運営者のGoogleドライブに保存されます。</p>
+              <p>「家族・友人と共有」で公開した写真は、あなたが選んだ会員だけが見られます。保存した写真は、最初はすべて「非公開」です。LINEなどで送ったリンクを、相手がさらに別の人へ転送することは防げません。見せたくない写真は公開しないでください。</p>
+              <p>化粧品・ヘアカラーで肌に異常が出たときは、使用をやめて専門家にご相談ください。</p>
+            </div>
+          </details>
+          <label class="check"><input type="checkbox" class="agree" id="agree-cautions"> 注意書きを読み、理解しました</label>
 
           <details>
             <summary>利用規約</summary>
@@ -90,6 +106,7 @@
               <p>本サービスは、顔写真をもとに髪型・メイクの提案やシミュレーションを行う無料の個人運営サービスです。</p>
               <p>アップロードした写真は、分析と画像生成のためにGoogleのAI（Gemini）へ送信されます。写真は運営者のGoogleドライブに一時保存され、7日を過ぎると自動で削除されます。「ギャラリーに保存」した画像は、ご自身で削除するまで保存されます。メニューの「保存された写真を削除」から、いつでもすべて削除できます。</p>
               <p>ご本人の写真、または写っている方の同意を得た写真のみを使用してください。他人を傷つける目的、法令や公序良俗に反する目的での利用は禁止します。</p>
+              <p>共有機能では、あなたが公開相手に追加し、公開にした写真だけが、その相手に表示されます。公開相手には、あなたのニックネームが表示されます。</p>
               <p>運営者は、予告なくサービス内容の変更・停止を行うことがあります。</p>
             </div>
           </details>
@@ -117,14 +134,14 @@
           <details>
             <summary>当事者間での問題解決について</summary>
             <div class="terms">
-              <p>本サービスで得た画像や情報を第三者と共有したことで生じたトラブルは、当事者間で話し合って解決するものとし、運営者は仲介や補償を行いません。</p>
+              <p>本サービスで得た画像や情報を第三者と共有したこと（共有機能・LINEなどで送ったリンク・保存した画像を含みます）で生じたトラブルは、当事者間で話し合って解決するものとし、運営者は仲介や補償を行いません。</p>
               <p>外部サービス・美容院・販売店などとのやり取りで生じた問題も、当事者間で解決してください。</p>
             </div>
           </details>
           <label class="check"><input type="checkbox" class="agree" id="agree-dispute"> 当事者間で問題を解決することに同意します</label>
         </fieldset>
 
-        <p id="agree-hint" class="hint">4つすべてにチェックすると登録できます。</p>
+        <p id="agree-hint" class="hint">5つすべてにチェックすると登録できます。</p>
         <button type="submit" id="reg-submit" class="btn btn-primary" disabled>登録して仮パスワードを受け取る</button>
       </form>
       <p class="auth-links"><button type="button" class="link to-login">ログイン画面に戻る</button></p>
@@ -365,7 +382,7 @@
       <!-- 6. ギャラリー -->
       <section class="step" id="step-gallery" aria-labelledby="h-gallery">
         <div class="step-head"><span class="step-no" aria-hidden="true">6</span><h2 id="h-gallery">ギャラリーで見比べる</h2></div>
-        <p class="lead">保存した「ヘア＋メイク」が並びます。タップして選ぶと（4枚まで）、下で見比べられます。</p>
+        <p class="lead">保存した「ヘア＋メイク」が並びます。タップして選ぶと（4枚まで）、下で見比べられます。「公開中」の印がついた写真は、8で選んだ家族・友人に見えています。</p>
         <div class="row-actions">
           <button type="button" id="gal-reload" class="btn btn-ghost btn-small">一覧を更新</button>
           <span id="gal-total" class="muted gal-total"></span>
@@ -428,6 +445,49 @@
           <button type="button" id="video-free-btn" class="btn btn-ghost">探す</button>
         </div>
       </section>
+
+      <!-- 8. 家族・友人と共有 -->
+      <section class="step" id="step-share" aria-labelledby="h-share">
+        <div class="step-head"><span class="step-no" aria-hidden="true">8</span><h2 id="h-share">家族・友人と共有する</h2></div>
+        <p class="lead">ギャラリーの写真を、あなたが選んだ会員にだけ見せられます。写真は最初はすべて非公開です。スイッチで、いつでも公開・非公開を切り替えられます。</p>
+
+        <div class="share-block">
+          <h3>公開相手</h3>
+          <p class="hint-soft">相手の会員登録メールアドレスで追加します。呼び名（例：母、ゆみちゃん）は、あなたにだけ見えます。</p>
+          <form id="member-form" class="member-form" novalidate>
+            <input type="email" id="member-email" autocomplete="off" placeholder="相手のメールアドレス" aria-label="相手のメールアドレス" required>
+            <input type="text" id="member-label" maxlength="20" placeholder="呼び名（任意）" aria-label="呼び名">
+            <button type="submit" class="btn btn-primary btn-small">追加する</button>
+          </form>
+          <p class="row-actions">
+            <button type="button" id="invite-line" class="btn btn-line btn-small">まだ会員でない人に、LINEで登録を案内する</button>
+          </p>
+          <p id="member-empty" class="muted">まだ公開相手はいません。</p>
+          <ul id="member-list" class="member-list"></ul>
+        </div>
+
+        <div class="share-block">
+          <h3>写真の公開設定</h3>
+          <div class="row-actions">
+            <button type="button" id="share-reload" class="btn btn-ghost btn-small">一覧を更新</button>
+            <button type="button" id="share-all-private" class="btn btn-ghost btn-small">すべて非公開にする</button>
+            <span id="share-count" class="muted gal-total"></span>
+          </div>
+          <p id="share-empty" class="muted">ギャラリーに保存した写真がここに並びます。</p>
+          <ul id="share-list" class="share-list"></ul>
+        </div>
+      </section>
+
+      <!-- 9. 見せてもらった写真 -->
+      <section class="step" id="step-shared" aria-labelledby="h-shared">
+        <div class="step-head"><span class="step-no" aria-hidden="true">9</span><h2 id="h-shared">見せてもらった写真</h2></div>
+        <p class="lead">家族・友人があなたに公開した「ヘア＋メイク」です。タップすると大きく見られます。</p>
+        <div class="row-actions">
+          <button type="button" id="shared-reload" class="btn btn-ghost btn-small">一覧を更新</button>
+        </div>
+        <p id="shared-empty" class="muted">まだありません。相手があなたを公開相手に追加し、写真を公開すると、ここに表示されます。</p>
+        <div id="shared-list" class="gal-list"></div>
+      </section>
     </section>
   </main>
 
@@ -441,7 +501,7 @@
   </div>
 
   <footer class="site-footer">
-    <p><span class="js-app-name">かがみAI</span> <span class="js-version">v1.4.0</span></p>
+    <p><span class="js-app-name">かがみAI</span> <span class="js-version">v1.5.0</span><span id="server-version" class="muted server-version"></span></p>
     <p class="muted">AIの提案は参考情報です。<small class="js-earth-credit"></small></p>
   </footer>
 
@@ -455,12 +515,42 @@
       <li><strong>ヘア＋メイクで仕上がりを見る</strong>試した髪型に選んだメイクを重ねた完成イメージを、元の写真と比べたり、ビフォーアフター画像として保存したりできます。</li>
       <li><strong>ギャラリーで見比べる</strong>「ギャラリーに保存」した組み合わせを一覧から選んで、並べたりスライダーで見比べたりできます。</li>
       <li><strong>動画で学ぶ</strong>AIが、あなたの髪型・メイクに合ったやり方動画（通常・ショート）を一覧にします。見たい動画を選ぶと再生できます。</li>
+      <li><strong>家族・友人と共有する</strong>相手の会員メールアドレスで「公開相手」に追加し、写真ごとのスイッチを「公開」にすると、その人だけが見られます（最初はすべて非公開）。見せる相手は写真ごとに選べます。「LINEで送る」で、その場でリンクを送れます。</li>
+      <li><strong>見せてもらった写真</strong>家族・友人があなたに公開した写真が9に並びます。LINEで届いたリンクを開いても見られます（ログインが必要です）。</li>
     </ol>
     <details class="voice-help">
-      <summary>話して操作できる言葉</summary>
-      <p>「カメラ」「撮影」「分析して」「解説を読んで」「止めて」「ボブにして」など髪型の名前、「メイク」「仕上がり」「ギャラリー」「動画」「使い方」。それ以外の言葉は要望欄に入ります。</p>
+      <summary>音声入力のコツ</summary>
+      <p>マイクを押してから話してください。言葉の間が少し空いても聞き続け、話し終えて数秒たつと自動で確定します。すぐ確定したいときは、マイクをもう一度押してください。</p>
     </details>
+    <details class="voice-help">
+      <summary>話して操作できる言葉</summary>
+      <p>「カメラ」「撮影」「分析して」「解説を読んで」「止めて」「ボブにして」など髪型の名前、「メイク」「仕上がり」「ギャラリー」「動画」「共有」「見せてもらった写真」「使い方」。それ以外の言葉は要望欄に入ります。</p>
+    </details>
+    <p class="muted guide-version"><span class="js-app-name">かがみAI</span> <span class="js-version">v1.5.0</span></p>
     <form method="dialog"><button class="btn btn-primary">はじめる</button></form>
+  </dialog>
+
+  <!-- 共有された写真を見る -->
+  <dialog id="look-dlg" class="dialog dialog-wide" aria-labelledby="look-title">
+    <h2 id="look-title">ヘア＆メイク</h2>
+    <p id="look-meta" class="muted"></p>
+    <img id="look-img" class="look-img" alt="">
+    <p id="look-summary" class="look-summary"></p>
+    <form method="dialog"><button class="btn btn-ghost">閉じる</button></form>
+  </dialog>
+
+  <!-- リンクを送る -->
+  <dialog id="send-dlg" class="dialog" aria-labelledby="send-title">
+    <h2 id="send-title">リンクを送る</h2>
+    <p id="send-note" class="muted"></p>
+    <div class="send-actions">
+      <a id="send-line" class="btn btn-line" href="#" target="_blank" rel="noopener">LINEで送る</a>
+      <button type="button" id="send-other" class="btn btn-ghost">ほかのアプリで送る</button>
+      <a id="send-mail" class="btn btn-ghost" href="#">メールで送る</a>
+      <button type="button" id="send-copy" class="btn btn-ghost">リンクをコピー</button>
+    </div>
+    <input type="text" id="send-url" class="send-url" readonly aria-label="送るリンク">
+    <form method="dialog"><button class="btn btn-ghost">閉じる</button></form>
   </dialog>
 
   <!-- 履歴 -->
@@ -491,7 +581,7 @@
       if (!window.__kagamiStarted) window.__kagamiBoot.fail('app.js が動いていません（ファイルが無いか、読み込みに失敗しています）。');
     }, 5000);
   </script>
-  <script src="config.js" onerror="window.__kagamiBoot.fail('config.js が見つかりません。')"></script>
-  <script type="module" src="app.js" onerror="window.__kagamiBoot.fail('app.js が見つかりません。')"></script>
+  <script src="config.js?v=1.5.0" onerror="window.__kagamiBoot.fail('config.js が見つかりません。')"></script>
+  <script type="module" src="app.js?v=1.5.0" onerror="window.__kagamiBoot.fail('app.js が見つかりません。')"></script>
 </body>
 </html>

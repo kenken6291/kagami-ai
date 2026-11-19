@@ -234,6 +234,11 @@
           </button>
         </div>
         <p id="request-live" class="live" aria-live="polite"></p>
+        <div class="model-picker">
+          <label for="model-select" class="field-label">分析に使うAIモデル</label>
+          <select id="model-select"></select>
+          <p class="hint-soft">選んだモデルが使えない時は、汎用の最新モデルに自動で切り替わります（メイク提案・動画おすすめも同じモデルを使います）</p>
+        </div>
         <button type="button" id="analyze-btn" class="btn btn-primary" disabled>AIに分析してもらう</button>
 
         <div id="analysis" class="analysis" hidden>
@@ -501,7 +506,8 @@
   </div>
 
   <footer class="site-footer">
-    <p><span class="js-app-name">かがみAI</span> <span class="js-version">v1.5.0</span><span id="server-version" class="muted server-version"></span></p>
+    <p><span class="js-app-name">かがみAI</span> <span class="js-version">v1.6.0</span><span id="server-version" class="muted server-version"></span></p>
+    <p class="muted model-now">AIモデル: <span id="model-now">-</span></p>
     <p class="muted">AIの提案は参考情報です。<small class="js-earth-credit"></small></p>
   </footer>
 
@@ -526,7 +532,7 @@
       <summary>話して操作できる言葉</summary>
       <p>「カメラ」「撮影」「分析して」「解説を読んで」「止めて」「ボブにして」など髪型の名前、「メイク」「仕上がり」「ギャラリー」「動画」「共有」「見せてもらった写真」「使い方」。それ以外の言葉は要望欄に入ります。</p>
     </details>
-    <p class="muted guide-version"><span class="js-app-name">かがみAI</span> <span class="js-version">v1.5.0</span></p>
+    <p class="muted guide-version"><span class="js-app-name">かがみAI</span> <span class="js-version">v1.6.0</span></p>
     <form method="dialog"><button class="btn btn-primary">はじめる</button></form>
   </dialog>
 

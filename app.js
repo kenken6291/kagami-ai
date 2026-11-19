@@ -80,7 +80,7 @@ async function api(action, data = {}) {
     res = await fetch(C.GAS_ENDPOINT, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ action, token: state.token, ...data }),
+      body: JSON.stringify({ action, token: state.token, model: aiModel.value, ...data }),
     });
   } catch (e) {
     throw new Error('サーバーに接続できませんでした。通信状態を確認してください。');
@@ -90,6 +90,7 @@ async function api(action, data = {}) {
     throw new Error('サーバーの応答を読み取れませんでした。GASのデプロイ設定（アクセス：全員）を確認してください。');
   }
   if (json.version) noteServerVersion(json.version);
+  if (json.aiModel) aiModel.noteUsed(json.aiModel, json.aiRequested, json.aiFallback);
   if (!json.ok) {
     if (json.code === 'AUTH') { clearSession(); showView('login'); }
     if (json.code === 'MUST_CHANGE') openChange(true);
@@ -97,6 +98,64 @@ async function api(action, data = {}) {
   }
   return json;
 }
+
+/* =========================================================
+ * AIモデルの選択（画面で選んだモデルを端末に保存して、毎回サーバーへ送る）
+ * ========================================================= */
+const aiModel = {
+  KEY: 'kagami_gemini_model',
+  value: '',
+  options() {
+    return Array.isArray(C.GEMINI_MODEL_OPTIONS) && C.GEMINI_MODEL_OPTIONS.length
+      ? C.GEMINI_MODEL_OPTIONS
+      : [{ value: '', label: '自動モード（汎用の最新）' }];
+  },
+  label(v) {
+    const o = this.options().find(x => x.value === v);
+    return o ? o.label : (v || '自動モード（汎用の最新）');
+  },
+  setup() {
+    const opts = this.options();
+    this.value = C.GEMINI_MODEL || '';
+    let saved = null;
+    try { saved = localStorage.getItem(this.KEY); } catch (e) { /* noop */ }
+    if (saved !== null && opts.some(o => o.value === saved)) this.value = saved;
+
+    const sel = $('#model-select');
+    if (sel) {
+      sel.innerHTML = '';
+      opts.forEach(o => {
+        const op = document.createElement('option');
+        op.value = o.value;
+        op.textContent = o.label;
+        sel.appendChild(op);
+      });
+      sel.value = this.value;
+      sel.addEventListener('change', () => {
+        this.value = sel.value;
+        try { localStorage.setItem(this.KEY, this.value); } catch (e) { /* noop */ }
+        this.show(this.label(this.value));
+        toast(`AIモデルを「${this.label(this.value)}」にしました。`);
+      });
+    }
+    this.show(this.label(this.value));
+  },
+  show(text) {
+    const el = $('#model-now');
+    if (el) el.textContent = text;
+  },
+  noteUsed(used, requested, fallback) {
+    if (fallback) {
+      this.show(`${used}（${requested} が使えなかったため自動で切替）`);
+      if (this.lastWarned !== requested) {
+        this.lastWarned = requested;
+        toast(`選んだモデル（${requested}）が使えなかったため、${used} で処理しました。`);
+      }
+    } else {
+      this.show(this.value ? this.label(this.value) : `自動モード（${used}）`);
+    }
+  },
+};
 
 /** サーバー（GAS）のバージョンを表示し、フロントと違えば知らせる */
 function noteServerVersion(v) {
@@ -2355,6 +2414,7 @@ function init() {
   try {
     if (!C) throw new Error('config.js が読み込まれていません。');
     applyConfig();
+    aiModel.setup();
     capturePendingLook();
     setupEarthStudio();
     setupPasswordToggles();

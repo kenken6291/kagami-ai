@@ -7,11 +7,26 @@
 window.CONFIG = {
   APP_NAME: 'かがみAI',
   APP_SUBTITLE: 'ヘア＆メイク試着室',
-  VERSION: 'v1.5.0',   // gas/Config.gs の APP_VERSION と合わせる（違うと画面に注意が出ます）
+  VERSION: 'v1.6.0',   // gas/Config.gs の APP_VERSION と合わせる（違うと画面に注意が出ます）
 
   // GASウェブアプリのURL（デプロイ後に表示される …/exec のURL）
   // ※本番とテストを切り替えるときは、ここを書き換えるだけでOK
   GAS_ENDPOINT: 'https://script.google.com/macros/s/AKfycbybkQgdG4a9qMdUOg3421jSmaAvYSN5zJ6dzBVybL86WwK6aiCNweBRnB7AH-HaO8Xa/exec',
+
+  // 分析・メイク提案・動画おすすめに使うGeminiモデル（画面の「AIモデル」で選べます）
+  //   value がAPIのモデルID。'' = 自動（汎用の最新モデル）
+  //   選んだモデルが使えない（廃止・未公開・名前違い）ときは、GAS側で汎用の最新モデルへ自動で切り替わります
+  //   ※髪型の画像生成と読み上げ音声は専用モデルを使うため、ここの選択とは別です（gas/Config.gs）
+  GEMINI_MODEL: '',
+  GEMINI_MODEL_OPTIONS: [
+    { value: '',                  label: '自動モード（汎用の最新）' },
+    { value: 'gemini-4-hydrogen', label: '4 Hydrogen（日々の暮らしをサポート）' },
+    { value: 'gemini-4-neon',     label: '4 Neon（Deeper analysis）' },
+    { value: 'gemini-4-carbon',   label: '4 Carbon（Code & complex work）' },
+    { value: 'gemini-4-argon',    label: '4 Argon' },
+    { value: 'gemini-3.8-flash',  label: '3.8 Flash' },
+    { value: 'gemini-3.5-flash',  label: '3.5 Flash' },
+  ],
 
   // 解説の読み上げ: 'gemini'（Gemini TTS、失敗時はブラウザ音声） / 'browser'（ブラウザ音声のみ）
   TTS_MODE: 'gemini',

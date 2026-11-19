@@ -8,7 +8,7 @@
  */
 
 // バージョン（フロントの config.js の VERSION と合わせる。違うと画面に注意が出ます）
-const APP_VERSION = 'v1.5.0';
+const APP_VERSION = 'v1.6.0';
 
 // 規約の版。注意書き・規約を変えたら日付を更新する
 const TERMS_VERSION = '2026-11-04';
@@ -26,10 +26,18 @@ const SHARE = {
   LABEL_MAX: 20,            // 呼び名の最大文字数
 };
 
+// 文章AIの自動モード・切り替え先（先頭から順に試す）
+//   gemini-flash-latest : Googleが常に最新の汎用モデルへ差し替えるエイリアス
+//   gemini-4-hydrogen   : 2026年11月時点の汎用最新モデル
+//   gemini-3.8-flash / gemini-2.5-flash : 最終的な保険
+const TEXT_MODEL_FALLBACKS = ['gemini-flash-latest', 'gemini-4-hydrogen', 'gemini-3.8-flash', 'gemini-2.5-flash'];
+
 const DEFAULTS = {
   APP_NAME: 'かがみAI',
   APP_URL: 'https://kenken6291.github.io/kagami-ai/',
-  GEMINI_TEXT_MODEL: 'gemini-2.5-flash',
+  // 文章AI（分析・メイク提案・動画おすすめ）の既定。'' なら下の TEXT_MODEL_FALLBACKS の先頭（自動）
+  //   画面で選んだモデルがあればそちらを優先します
+  GEMINI_TEXT_MODEL: '',
   // カンマ区切りで複数指定すると、失敗時に順番に試す
   GEMINI_IMAGE_MODEL: 'gemini-3.1-flash-image,gemini-2.5-flash-image,gemini-3.1-flash-lite-image',
   GEMINI_TTS_MODEL: 'gemini-2.5-flash-preview-tts',

@@ -1,6 +1,6 @@
 /**
  * かがみAI ～ヘア＆メイク試着室  バックエンド（Google Apps Script）
- * v1.5.0
+ * v1.6.0
  *
  * ■ ファイル構成（GASエディタ）
  *   Config.gs … バージョン・各種上限・既定値（設定はここだけ書き換え）
@@ -11,6 +11,7 @@
  *   任意  YOUTUBE_API_KEY       … YouTube Data API v3 キー（無ければ動画は「YouTubeで開く」リンクのみ）
  *   任意  APP_NAME / APP_URL    … メール本文に使うアプリ名・公開URL
  *   任意  GEMINI_TEXT_MODEL / GEMINI_TTS_MODEL / TTS_VOICE
+ *         ※文章AIのモデルは画面で選べます（選んだモデルが使えなければ汎用の最新へ自動切替）
  *   任意  GEMINI_IMAGE_MODEL … カンマ区切りで複数可（例: gemini-3.1-flash-image,gemini-2.5-flash-image）
  *         ※画像生成は無料枠では使えない場合があります（Google AI Studio で課金設定が必要）
  *   任意  DAILY_AI_LIMIT（既定40） / IMAGE_RETENTION_DAYS（既定7） / MAX_LOOKS（ギャラリー上限、既定30）
@@ -106,17 +107,18 @@ function setup() {
 
 /** 動作確認用：Gemini APIに簡単な質問を送ります */
 function testGemini() {
-  const res = callGemini_(prop_('GEMINI_TEXT_MODEL'), {
+  const res = callTextGemini_({}, {
     contents: [{ role: 'user', parts: [{ text: '「こんにちは」とだけ返してください。' }] }],
   });
-  Logger.log(extractText_(res));
+  Logger.log(TEXT_MODEL_STATE.used + ': ' + extractText_(res));
 }
 
 /* =========================================================
  * エントリーポイント
  * ========================================================= */
 function doGet() {
-  return json_({ ok: true, app: prop_('APP_NAME'), version: APP_VERSION, terms: TERMS_VERSION });
+  return json_({ ok: true, app: prop_('APP_NAME'), version: APP_VERSION, terms: TERMS_VERSION,
+    defaultModel: resolveTextModel_(''), fallbackModels: TEXT_MODEL_FALLBACKS });
 }
 
 function doPost(e) {
@@ -125,7 +127,14 @@ function doPost(e) {
     const req = JSON.parse((e && e.postData && e.postData.contents) || '{}');
     const fn = ROUTES[req.action];
     if (!fn) throw new Error('不明な操作です: ' + req.action);
+    TEXT_MODEL_STATE.used = '';
+    TEXT_MODEL_STATE.requested = '';
     out = Object.assign({ ok: true, version: APP_VERSION }, fn(req));
+    if (TEXT_MODEL_STATE.used) {
+      out.aiModel = TEXT_MODEL_STATE.used;
+      out.aiRequested = TEXT_MODEL_STATE.requested;
+      out.aiFallback = TEXT_MODEL_STATE.used !== TEXT_MODEL_STATE.requested;
+    }
   } catch (err) {
     out = { ok: false, error: (err && err.message) || String(err), code: (err && err.code) || '' };
   }
@@ -413,7 +422,7 @@ function analyze_(req) {
   const img = checkImage_(req.image, req.mimeType);
   const request = sanitizeText_(req.request, 300) || '特になし';
 
-  const res = callGemini_(prop_('GEMINI_TEXT_MODEL'), {
+  const res = callTextGemini_(req, {
     contents: [{
       role: 'user',
       parts: [
@@ -635,7 +644,7 @@ function recommendVideos_(req) {
       .replace('{MAKEUP}', sanitizeText_(c.makeup, 200) || '未選択')
       .replace('{REQUEST}', sanitizeText_(c.request, 200) || '特になし')
       .replace('{HINTS}', (Array.isArray(c.hints) ? c.hints : []).map(function (h) { return sanitizeText_(h, 60); }).join('、') || 'なし');
-    const res = callGemini_(prop_('GEMINI_TEXT_MODEL'), {
+    const res = callTextGemini_(req, {
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
       generationConfig: { responseMimeType: 'application/json', temperature: 0.7 },
     });
@@ -737,7 +746,7 @@ function makeupPlan_(req) {
     .replace('{TEXT}', text)
     .replace('{FACE}', sanitizeText_(ctx.faceShape, 30) || '不明')
     .replace('{PC}', sanitizeText_(ctx.personalColor, 30) || '不明');
-  const res = callGemini_(prop_('GEMINI_TEXT_MODEL'), {
+  const res = callTextGemini_(req, {
     contents: [{ role: 'user', parts: [{ text: prompt }] }],
     generationConfig: { responseMimeType: 'application/json', temperature: 0.6 },
   });
@@ -1086,7 +1095,7 @@ function getSharedLook_(req) {
 function callGeminiRaw_(model, body) {
   const key = prop_('GEMINI_API_KEY');
   if (!key) throw new Error('サーバーにGemini APIキーが設定されていません。');
-  const url = 'https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent';
+  const url = 'https://generativelanguage.googleapis.com/v1beta/models/' + encodeURIComponent(model) + ':generateContent';
   const opt = {
     method: 'post',
     contentType: 'application/json',
@@ -1107,6 +1116,45 @@ function callGeminiRaw_(model, body) {
   try { json = JSON.parse(res.getContentText()); } catch (e) { /* noop */ }
   if (code !== 200 && json && json.error) message = String(json.error.message || '');
   return { code: code, json: json, message: message };
+}
+
+/* ---------- 文章AIのモデル選択 ---------- */
+const GEMINI_MODEL_PATTERN = /^gemini-[a-z0-9][a-z0-9.\-]{0,60}$/;
+// 1回のリクエストで実際に使ったモデル（doPostで応答に付ける）
+const TEXT_MODEL_STATE = { used: '', requested: '' };
+
+/** 使うモデルを決める：画面の指定 → プロパティ/Config.gs → 自動（汎用の最新） */
+function resolveTextModel_(requested) {
+  const req = String(requested || '').trim().toLowerCase();
+  if (req && GEMINI_MODEL_PATTERN.test(req)) return req;
+  const def = String(prop_('GEMINI_TEXT_MODEL') || '').trim().toLowerCase();
+  if (def && GEMINI_MODEL_PATTERN.test(def)) return def;
+  return TEXT_MODEL_FALLBACKS[0];
+}
+
+/** モデルが存在しない・この方法では使えない（廃止・名前違い・未公開）ことを示す応答か */
+function isModelUnavailable_(r) {
+  if (r.code === 404) return true;
+  if (r.code === 403 && /model|permission|access/i.test(r.message)) return true;
+  if (r.code === 400) return /not found|is not supported|NOT_FOUND|unknown model|invalid model|model.*not/i.test(r.message);
+  return false;
+}
+
+/** 文章AIを呼ぶ。選んだモデルが使えなければ汎用の最新モデルへ順に切り替える */
+function callTextGemini_(req, body) {
+  const first = resolveTextModel_(req && req.model);
+  const candidates = [first].concat(TEXT_MODEL_FALLBACKS.filter(function (m) { return m !== first; }));
+  let r = null;
+  for (let i = 0; i < candidates.length; i++) {
+    r = callGeminiRaw_(candidates[i], body);
+    TEXT_MODEL_STATE.requested = first;
+    TEXT_MODEL_STATE.used = candidates[i];
+    if (r.code === 200 && r.json) return r.json;
+    if (!isModelUnavailable_(r)) break;
+    console.warn('Geminiモデル「' + candidates[i] + '」が使えないため次の候補に切り替えます: ' + r.message);
+  }
+  if (r.code === 429) throw new Error('AIが混み合っているか、利用上限に達しています。少し待ってからお試しください。');
+  throw new Error('AIの処理に失敗しました（' + r.code + ' / ' + TEXT_MODEL_STATE.used + '）' + (r.message ? ': ' + r.message.slice(0, 120) : ''));
 }
 
 function callGemini_(model, body) {

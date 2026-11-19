@@ -121,7 +121,14 @@ input[type="email"], input[type="text"], input[type="password"], input[type="sea
   width: 100%; padding: 12px 14px; border: 1.5px solid var(--line); border-radius: 10px;
   background: var(--surface); min-height: 48px;
 }
-input:focus, textarea:focus { border-color: var(--ink); outline: none; }
+select {
+  width: 100%; padding: 12px 14px; border: 1.5px solid var(--line); border-radius: 10px;
+  background: var(--surface); min-height: 48px; cursor: pointer;
+}
+input:focus, textarea:focus, select:focus { border-color: var(--ink); outline: none; }
+.model-picker { margin: 4px 0 16px; }
+.model-picker .field-label { margin-top: 8px; }
+.model-now { font-size: .85rem; margin: 4px 0 0; }
 textarea { resize: vertical; }
 input[type="range"] { accent-color: var(--rouge); width: 100%; }
 input[type="checkbox"], input[type="radio"] { accent-color: var(--rouge); width: 20px; height: 20px; }

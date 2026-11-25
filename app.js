@@ -1,4 +1,4 @@
-/* かがみAI app.js v1.5.0 */
+/* かがみAI app.js v1.6.1 */
 const C = window.CONFIG;
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
@@ -157,16 +157,47 @@ const aiModel = {
   },
 };
 
-/** サーバー（GAS）のバージョンを表示し、フロントと違えば知らせる */
+/** "v1.6.0" → [1,6,0] */
+function parseVer(v) {
+  return String(v || '').replace(/^v/i, '').split('.').map(n => parseInt(n, 10) || 0);
+}
+function cmpVer(a, b) {
+  const x = parseVer(a), y = parseVer(b);
+  for (let i = 0; i < Math.max(x.length, y.length); i++) {
+    const d = (x[i] || 0) - (y[i] || 0);
+    if (d) return d > 0 ? 1 : -1;
+  }
+  return 0;
+}
+
+/** サーバー（GAS）のバージョンを表示し、フロントと違えば対処する
+ *  - 画面とサーバーの「メジャー.マイナー」が同じなら（パッチ違いのみ）何もしない
+ *  - サーバーの方が新しい → 画面が古いキャッシュなので、1回だけ自動で再読み込み
+ *  - サーバーの方が古い → 管理者向けの注意を1セッション1回だけ控えめに表示（操作は止めない）
+ */
 function noteServerVersion(v) {
   if (state.serverVersion === v) return;
   state.serverVersion = v;
   const sv = $('#server-version');
   if (sv) sv.textContent = `（サーバー ${v}）`;
-  if (v !== C.VERSION) {
-    console.warn(`バージョン不一致: 画面 ${C.VERSION} / サーバー ${v}`);
-    toast(`画面（${C.VERSION}）とサーバー（${v}）のバージョンが違います。GASを「新バージョン」でデプロイし直すか、画面を再読み込みしてください。`, 'error');
+
+  const a = parseVer(C.VERSION), b = parseVer(v);
+  if (a[0] === b[0] && a[1] === b[1]) return;
+  console.warn(`バージョン不一致: 画面 ${C.VERSION} / サーバー ${v}`);
+
+  const key = `kagami_ver_${C.VERSION}_${v}`;
+  let done = false;
+  try { done = !!sessionStorage.getItem(key); sessionStorage.setItem(key, '1'); } catch (_) {}
+  if (done) return;
+
+  if (cmpVer(v, C.VERSION) > 0) {
+    const u = new URL(location.href);
+    u.searchParams.set('_v', v.replace(/^v/i, ''));
+    location.replace(u.toString());
+    return;
   }
+  if (sv) sv.classList.add('version-old');
+  toast(`サーバーが少し古い版（${v}）です。そのままお使いいただけます。`);
 }
 
 async function run(task, text) {
